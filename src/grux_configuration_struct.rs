@@ -6,7 +6,7 @@ pub struct Server {
     pub bindings: Vec<Binding>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Binding {
     pub ip: String,
@@ -30,6 +30,16 @@ pub struct Sites {
 #[allow(unused)]
 pub struct Configuration {
     pub servers: Vec<Server>,
+    pub admin_site: AdminSite,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AdminSite {
+    pub is_admin_portal_enabled: bool,
+    pub admin_portal_ip: String,
+    pub admin_portal_port: u32,
+    pub admin_portal_web_root: String,
+    pub admin_portal_index_file: String,
 }
 
 impl Configuration {
@@ -52,6 +62,17 @@ impl Configuration {
 
         let default_server = Server { bindings: vec![default_binding] };
 
-        Configuration { servers: vec![default_server] }
+        let admin_site = AdminSite {
+            is_admin_portal_enabled: true,
+            admin_portal_ip: "0.0.0.0".to_string(),
+            admin_portal_port: 8000,
+            admin_portal_web_root: "./www-admin/".to_string(),
+            admin_portal_index_file: "index.html".to_string(),
+        };
+
+        Configuration {
+            servers: vec![default_server],
+            admin_site,
+        }
     }
 }

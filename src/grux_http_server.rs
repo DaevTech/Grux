@@ -1,3 +1,4 @@
+use crate::grux_configuration_struct::AdminSite;
 use crate::grux_configuration_struct::Binding;
 use crate::grux_configuration_struct::Server;
 use crate::grux_configuration_struct::Sites;
@@ -14,8 +15,8 @@ use log::{error, info, trace};
 use mime_guess::MimeGuess;
 use std::net::SocketAddr;
 use tokio::fs;
-use tokio::join;
 use tokio::net::TcpListener;
+use futures::future::join_all;
 
 #[tokio::main]
 pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -31,50 +32,80 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
 
     let mut started_servers = Vec::new();
 
+    // Starting the admin server, if enabled
+    let admin_site_config: AdminSite = config.get("admin_site").unwrap();
+
+    if admin_site_config.is_admin_portal_enabled {
+        let admin_binding = Binding {
+            ip: admin_site_config.admin_portal_ip.clone(),
+            port: admin_site_config.admin_portal_port.to_string(),
+            sites: vec![Sites {
+                hostnames: vec!["*".to_string()],
+                is_default: true,
+                is_enabled: true,
+                is_ssl: false,
+                is_ssl_required: false,
+                web_root: admin_site_config.admin_portal_web_root.clone(),
+                web_root_index_file_list: vec![admin_site_config.admin_portal_index_file.clone()],
+            }],
+        };
+
+        let admin_server = start_server_binding(admin_binding);
+        started_servers.push(admin_server);
+
+        info!("Starting Grux admin server on {}:{}", admin_site_config.admin_portal_ip, admin_site_config.admin_portal_port);
+    } else {
+        info!("Grux admin portal is disabled in the configuration.");
+    }
+
+    // Starting the defined client servers
     for server in servers {
         for binding in server.bindings {
             let ip = binding.ip.parse::<std::net::IpAddr>().map_err(|e| format!("Invalid IP address: {}", e))?;
             let port = binding.port.parse::<u16>().map_err(|e| format!("Invalid port: {}", e))?;
             let addr = SocketAddr::new(ip, port);
 
-            let binds = Box::new(binding);
-            let leaked_bindings: &'static Binding = Box::leak(binds);
-
             // Start listening on the specified address
-            let srv = async move {
-                let listener = TcpListener::bind(addr).await.unwrap();
-                loop {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let io = TokioIo::new(stream);
-
-                    let sites = &leaked_bindings.sites;
-
-                    tokio::task::spawn(async move {
-                        let svc = service_fn(move |req| handle_request(req, sites));
-
-                        if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
-                            println!("Error serving connection: {:?}", err);
-                        }
-                    });
-                }
-            };
+            let server = start_server_binding(binding);
+            started_servers.push(server);
 
             info!("Starting Grux server on {}", addr);
-
-            started_servers.push(srv);
         }
     }
 
-    // Join threads
-    for server in started_servers {
-        join!(server);
-    }
+    // Wait for all servers to finish (which is never, unless one panics)
+    join_all(started_servers).await;
 
     Ok(())
 }
 
+fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = ()> {
+    let ip = binding.ip.parse::<std::net::IpAddr>().unwrap();
+    let port = binding.port.parse::<u16>().unwrap();
+    let addr = SocketAddr::new(ip, port);
+
+    async move {
+        let listener = TcpListener::bind(addr).await.unwrap();
+        trace!("Listening on binding: {:?}", binding);
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+
+            tokio::task::spawn({
+                let binding = binding.clone();
+                async move {
+                    let svc = service_fn(move |req| handle_request(req, binding.clone()));
+                    if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
+                        println!("Error serving connection: {:?}", err);
+                    }
+                }
+            });
+        }
+    }
+}
+
 // Handle the incoming request
-async fn handle_request(req: Request<hyper::body::Incoming>, sites: &Vec<Sites>) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Extract data for the request
     let headers = req.headers();
     let headers_map = headers.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or(""))).collect::<Vec<_>>();
@@ -87,7 +118,7 @@ async fn handle_request(req: Request<hyper::body::Incoming>, sites: &Vec<Sites>)
     let requested_hostname = headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
 
     // Figure out which site we are serving
-    let site = find_best_match_site(sites, requested_hostname);
+    let site = find_best_match_site(&binding.sites, requested_hostname);
     if let None = site {
         return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
     }
@@ -222,7 +253,7 @@ fn validate_requests(req: &Request<hyper::body::Incoming>) -> Result<(), hyper::
 */
 
 // Find a best match site for the requested hostname
-fn find_best_match_site<'a>(sites: &'a [Sites], requested_hostname: &str) -> Option<&'a Sites> {
+fn find_best_match_site<'a>(sites: &'a [Sites], requested_hostname: &'a str) -> Option<&'a Sites> {
     let mut site = sites.iter().find(|s| s.hostnames.contains(&requested_hostname.to_string()) && s.is_enabled);
 
     // We check for star hostnames
@@ -246,22 +277,4 @@ fn find_best_match_site<'a>(sites: &'a [Sites], requested_hostname: &str) -> Opt
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
-}
-
-#[derive(Clone)]
-// An Executor that uses the tokio runtime.
-pub struct TokioExecutor;
-
-// Implement the `hyper::rt::Executor` trait for `TokioExecutor` so that it can be used to spawn
-// tasks in the hyper runtime.
-// An Executor allows us to manage execution of tasks which can help us improve the efficiency and
-// scalability of the server.
-impl<F> hyper::rt::Executor<F> for TokioExecutor
-where
-    F: std::future::Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    fn execute(&self, fut: F) {
-        tokio::task::spawn(fut);
-    }
 }

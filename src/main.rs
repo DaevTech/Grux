@@ -1,11 +1,17 @@
-use grux::grux_http_server;
 use grux::grux_configuration;
+use grux::grux_http_server;
 use grux::grux_log;
 use log::{error, info};
 
 fn main() {
     // Initialize logging
-    let _log_handle = grux_log::init_logging().unwrap();
+    match grux_log::init_logging() {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to initialize logging: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     // Starting grux
     let version = env!("CARGO_PKG_VERSION", "unknown");
@@ -21,11 +27,9 @@ fn main() {
 
     // Load the admin services endpoints
 
-
     // Init server bindings and start serving those bits
     if let Err(e) = crate::grux_http_server::initialize_server() {
-        error!("Error initializing bindings: {}", e);
-        error!("Make sure the port(s) is not already in use and that you have the necessary permissions to bind to it.");
+        error!("Error initializing server: {}", e);
         std::process::exit(1);
     }
 }

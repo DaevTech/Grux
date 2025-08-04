@@ -35,7 +35,7 @@ fn init() -> Result<Config, String> {
             .map_err(|e| format!("Failed to insert default configuration into database: {}", e))?;
     }
 
-    // Explicitly drop the statement before dropping the connection
+    // Explicitly drop the statement before dropping the connection, all to prevent dangling connection to db
     drop(statement);
     drop(connection);
 
@@ -43,7 +43,9 @@ fn init() -> Result<Config, String> {
         .add_source(config::File::from_str(&configuration_json, config::FileFormat::Json))
         .build()
         .map_err(|e| format!("Failed to build configuration: {}", e))?;
-    // Explicitly drop the statement before dropping the connection
+
+    // Validate the configuration, to check if it matches with the configuration struct
+    config.clone().try_deserialize::<Configuration>().map_err(|e| format!("Failed to deserialize configuration: {}", e))?;
 
     Ok(config)
 }
