@@ -11,6 +11,7 @@ pub struct Server {
 pub struct Binding {
     pub ip: String,
     pub port: String,
+    pub is_admin: bool,
     pub sites: Vec<Sites>,
 }
 
@@ -57,6 +58,7 @@ impl Configuration {
         let default_binding = Binding {
             ip: "0.0.0.0".to_string(),
             port: "80".to_string(),
+            is_admin: false,
             sites: vec![default_site],
         };
 

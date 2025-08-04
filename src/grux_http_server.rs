@@ -39,6 +39,7 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
         let admin_binding = Binding {
             ip: admin_site_config.admin_portal_ip.clone(),
             port: admin_site_config.admin_portal_port.to_string(),
+            is_admin: true,
             sites: vec![Sites {
                 hostnames: vec!["*".to_string()],
                 is_default: true,
