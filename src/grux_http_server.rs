@@ -2,7 +2,7 @@ use crate::grux_configuration_struct::*;
 use crate::grux_http_admin::*;
 use crate::grux_http_util::*;
 use futures::future::join_all;
-use http_body_util::{combinators::BoxBody};
+use http_body_util::combinators::BoxBody;
 use hyper::body::Body;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
@@ -131,16 +131,26 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -
     );
     trace!("Matched site with request: {:?}", site);
 
+    // First, check if the there is a specific file requested
+    let web_root = &site.web_root;
+
+    // Check if if request is for path or file
+    let path_cleaned = clean_url_path(path);
+
+    let mut file_path = clean_url_path(&format!("{}/{}", web_root, path_cleaned));
+
     // Check if the request is for the admin portal
     if binding.is_admin {
+        trace!("Handling request for admin portal with path: {}", path_cleaned);
         // We only want to handle a few paths in the admin portal
-        if path == "login" && method == hyper::Method::POST {
+        if path_cleaned == "" && method == hyper::Method::GET {
+        } else if path_cleaned == "login" && method == hyper::Method::POST {
             return handle_login_request(&req, site);
-        } else if path == "logout" && method == hyper::Method::POST {
+        } else if path_cleaned == "logout" && method == hyper::Method::POST {
             return handle_logout_request(&req, site);
-        } else if path == "config" && method == hyper::Method::GET {
+        } else if path_cleaned == "config" && method == hyper::Method::GET {
             return admin_get_configuration_endpoint(&req, site);
-        } else if path == "config" && method == hyper::Method::POST {
+        } else if path_cleaned == "config" && method == hyper::Method::POST {
             return admin_post_configuration_endpoint(&req, site);
         } else {
             // For any other path, we return a 404
@@ -148,11 +158,6 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -
         }
     }
 
-    // First, check if the there is a specific file requested
-    let web_root = &site.web_root;
-
-    // Check if if request is for path or file
-    let mut file_path = clean_url_path(&format!("{}{}", web_root, path));
     trace!("Checking file path: {}", file_path);
 
     // Check if the file/dir exists
@@ -218,7 +223,6 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -
 
     Ok(resp)
 }
-
 
 /*
 fn validate_requests(req: &Request<hyper::body::Incoming>) -> Result<(), hyper::Error> {
