@@ -106,48 +106,38 @@ fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = (
 
 // Handle the incoming request
 async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    // Extract data for the request
-    let headers = req.headers();
-    let headers_map = headers.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or(""))).collect::<Vec<_>>();
-    let method = req.method();
-    let uri = req.uri();
+    // Extract data for the request before we borrow/move
+    let method = req.method().clone();
+    let uri = req.uri().clone();
     let path = uri.path();
     let query = uri.query().unwrap_or("");
-    // let version = req.version();
     let body_size = req.body().size_hint().upper().unwrap_or(0);
-    let requested_hostname = headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
+
+    // Extract hostname from headers
+    let requested_hostname = {
+        let headers = req.headers();
+        headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("").to_string()
+    };
 
     // Figure out which site we are serving
-    let site = find_best_match_site(&binding.sites, requested_hostname);
+    let site = find_best_match_site(&binding.sites, &requested_hostname);
     if let None = site {
         return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
     }
     let site = site.unwrap();
 
-    // Now se determine what the request is, and how to handle it
-    trace!(
-        "Received request: method={}, path={}, query={}, body_size={}, headers={:?}",
-        method, path, query, body_size, headers_map
-    );
-    trace!("Matched site with request: {:?}", site);
-
-    // First, check if the there is a specific file requested
-    let web_root = &site.web_root;
-
-    // Check if if request is for path or file
-    let path_cleaned = clean_url_path(path);
-
-    let mut file_path = clean_url_path(&format!("{}/{}", web_root, path_cleaned));
-
-    // Check if the request is for the admin portal
+    // Check if the request is for the admin portal - handle these first
     if binding.is_admin {
+        let path_cleaned = clean_url_path(path);
         trace!("Handling request for admin portal with path: {}", path_cleaned);
+
         // We only want to handle a few paths in the admin portal
         if path_cleaned == "" && method == hyper::Method::GET {
+            // Fall through to serve the admin index file
         } else if path_cleaned == "login" && method == hyper::Method::POST {
-            return handle_login_request(&req, site);
+            return handle_login_request(req, site).await;
         } else if path_cleaned == "logout" && method == hyper::Method::POST {
-            return handle_logout_request(&req, site);
+            return handle_logout_request(req, site).await;
         } else if path_cleaned == "config" && method == hyper::Method::GET {
             return admin_get_configuration_endpoint(&req, site);
         } else if path_cleaned == "config" && method == hyper::Method::POST {
@@ -157,6 +147,23 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -
             return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
         }
     }
+
+    // Now se determine what the request is, and how to handle it
+    let headers = req.headers();
+    let headers_map = headers.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or(""))).collect::<Vec<_>>();
+    trace!(
+        "Received request: method={}, path={}, query={}, body_size={}, headers={:?}",
+        method, path, query, body_size, headers_map
+    );
+    trace!("Matched site with request: {:?}", site);
+
+        // First, check if there is a specific file requested
+    let web_root = &site.web_root;
+
+    // Check if if request is for path or file
+    let path_cleaned = clean_url_path(path);
+
+    let mut file_path = clean_url_path(&format!("{}/{}", web_root, path_cleaned));
 
     trace!("Checking file path: {}", file_path);
 

@@ -1,6 +1,7 @@
 use grux::grux_configuration;
 use grux::grux_http_server;
 use grux::grux_log;
+use grux::grux_database;
 use log::{error, info};
 
 fn main() {
@@ -24,6 +25,13 @@ fn main() {
         std::process::exit(1);
     }
     info!("Configuration loaded successfully.");
+
+    // Initialize database tables and migrations
+    if let Err(e) = grux_database::initialize_database() {
+        error!("Failed to initialize database: {}", e);
+        std::process::exit(1);
+    }
+    info!("Database initialized successfully.");
 
     // Load the admin services endpoints
 
