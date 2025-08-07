@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import ConfigEditor from './ConfigEditor.vue'
 
 // Define props and emits
 const props = defineProps({
@@ -16,6 +17,7 @@ const isLoading = ref(false)
 const config = ref(null)
 const error = ref('')
 const activeTab = ref('dashboard')
+const showConfigEditor = ref(false)
 
 // Server stats
 const stats = reactive({
@@ -67,9 +69,22 @@ const handleLogout = () => {
 // Tab navigation
 const setActiveTab = (tab) => {
   activeTab.value = tab
+  showConfigEditor.value = false
   if (tab === 'config' && !config.value) {
     loadConfiguration()
   }
+}
+
+// Show configuration editor
+const openConfigEditor = () => {
+  showConfigEditor.value = true
+}
+
+// Close configuration editor
+const closeConfigEditor = () => {
+  showConfigEditor.value = false
+  // Reload config after potential changes
+  loadConfiguration()
 }
 
 // Initialize dashboard
@@ -188,10 +203,19 @@ onMounted(() => {
         </div>
 
         <div v-else-if="config" class="config-display">
-          <div class="config-note">
-            <p><strong>Note:</strong> Configuration editing is not yet implemented in this version.</p>
+          <div class="config-actions">
+            <button @click="openConfigEditor" class="edit-config-button">
+              ⚙️ Edit Configuration
+            </button>
+            <button @click="loadConfiguration" class="refresh-button">
+              🔄 Refresh
+            </button>
           </div>
-          <pre class="config-text">{{ config }}</pre>
+
+          <div class="config-viewer">
+            <h3>Current Configuration</h3>
+            <pre class="config-text">{{ JSON.stringify(JSON.parse(config), null, 2) }}</pre>
+          </div>
         </div>
 
         <div v-else>
@@ -212,6 +236,14 @@ onMounted(() => {
         </div>
       </div>
     </main>
+
+    <!-- Configuration Editor Modal -->
+    <div v-if="showConfigEditor" class="config-modal">
+      <div class="config-modal-backdrop" @click="closeConfigEditor"></div>
+      <div class="config-modal-content">
+        <ConfigEditor :user="user" @close="closeConfigEditor" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -439,6 +471,87 @@ onMounted(() => {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
+}
+
+.config-actions {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.edit-config-button {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.edit-config-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+}
+
+.refresh-button {
+  padding: 0.75rem 1.5rem;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(16, 185, 129, 0.3);
+}
+
+.config-viewer {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  padding: 1.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.config-viewer h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.config-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.config-modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.config-modal-content {
+  position: relative;
+  width: 100%;
+  max-width: 1200px;
+  max-height: 90vh;
+  z-index: 1001;
 }
 
 .config-note {

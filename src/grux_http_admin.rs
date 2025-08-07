@@ -134,11 +134,57 @@ pub async fn handle_logout_request(req: Request<hyper::body::Incoming>, _admin_s
     }
 }
 
-pub fn admin_get_configuration_endpoint(_req: &Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    // Here we can handle the get configuration requests
-    let mut resp = Response::new(full("Get configuration endpoint not implemented yet"));
-    *resp.status_mut() = hyper::StatusCode::OK;
-    Ok(resp)
+pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    // Check authentication first
+    match require_authentication(req).await {
+        Ok(Some(_session)) => {
+            // User is authenticated, proceed with getting configuration
+            debug!("User authenticated, retrieving configuration");
+        }
+        Ok(None) => {
+            // This shouldn't happen as require_authentication returns error for None
+            let mut resp = Response::new(full(r#"{"error": "Authentication required"}"#));
+            *resp.status_mut() = hyper::StatusCode::UNAUTHORIZED;
+            resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+            return Ok(resp);
+        }
+        Err(auth_response) => {
+            // Authentication failed, return the auth error response
+            return Ok(auth_response);
+        }
+    }
+
+    // Get the current configuration
+    let config = crate::grux_configuration::get_configuration();
+
+    // Try to deserialize the configuration to ensure it's valid
+    match config.clone().try_deserialize::<crate::grux_configuration_struct::Configuration>() {
+        Ok(configuration) => {
+            // Serialize the configuration to JSON
+            match serde_json::to_string_pretty(&configuration) {
+                Ok(json_string) => {
+                    let mut resp = Response::new(full(json_string));
+                    *resp.status_mut() = hyper::StatusCode::OK;
+                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+                    Ok(resp)
+                }
+                Err(e) => {
+                    error!("Failed to serialize configuration to JSON: {}", e);
+                    let mut resp = Response::new(full(r#"{"error": "Failed to serialize configuration"}"#));
+                    *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
+                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+                    Ok(resp)
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to deserialize configuration: {}", e);
+            let mut resp = Response::new(full(r#"{"error": "Invalid configuration format"}"#));
+            *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
+            resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+            Ok(resp)
+        }
+    }
 }
 
 pub fn admin_post_configuration_endpoint(_req: &Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
@@ -157,13 +203,6 @@ async fn get_session_token_from_request(req: &Request<hyper::body::Incoming>) ->
                 return Some(auth_str[7..].to_string());
             }
         }
-    }
-
-    // If no Authorization header, try to read from request body (for POST requests)
-    if req.method() == hyper::Method::POST {
-        // We can't consume the body here without cloning/moving it
-        // For now, we'll only support Authorization header
-        // In a full implementation, you might want to parse the body for a token field
     }
 
     None
