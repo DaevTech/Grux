@@ -14,10 +14,8 @@ const emit = defineEmits(['logout'])
 
 // Dashboard state
 const isLoading = ref(false)
-const config = ref(null)
 const error = ref('')
 const activeTab = ref('dashboard')
-const showConfigEditor = ref(false)
 
 // Server stats
 const stats = reactive({
@@ -27,8 +25,8 @@ const stats = reactive({
   lastUpdated: new Date()
 })
 
-// Load server configuration
-const loadConfiguration = async () => {
+// Load server configuration (for stats only)
+const loadServerStats = async () => {
   isLoading.value = true
   error.value = ''
 
@@ -42,14 +40,15 @@ const loadConfiguration = async () => {
     })
 
     if (response.ok) {
-      const data = await response.text()
-      config.value = data
+      // We can use this for stats if needed in the future
+      // For now just clear any errors
+      error.value = ''
     } else {
-      error.value = 'Failed to load configuration'
+      error.value = 'Failed to load server stats'
     }
   } catch (err) {
-    console.error('Config loading error:', err)
-    error.value = 'Network error while loading configuration'
+    console.error('Server stats loading error:', err)
+    error.value = 'Network error while loading server stats'
   } finally {
     isLoading.value = false
   }
@@ -69,15 +68,6 @@ const handleLogout = () => {
 // Tab navigation
 const setActiveTab = (tab) => {
   activeTab.value = tab
-  showConfigEditor.value = false
-  if (tab === 'config' && !config.value) {
-    loadConfiguration()
-  }
-}
-
-// Show configuration editor
-const openConfigEditor = () => {
-  showConfigEditor.value = true
 }
 
 // Close configuration editor
@@ -100,8 +90,7 @@ onMounted(() => {
     <header class="dashboard-header">
       <div class="header-content">
         <div class="header-left">
-          <h1>Grux Admin Dashboard</h1>
-          <p>Welcome back, {{ user.username }}!</p>
+          <h1>Grux Administration</h1>
         </div>
         <div class="header-right">
           <button @click="handleLogout" class="logout-button">
@@ -190,38 +179,9 @@ onMounted(() => {
 
       <!-- Configuration Tab -->
       <div v-else-if="activeTab === 'config'" class="config-content">
-        <h2>Server Configuration</h2>
-
-        <div v-if="isLoading" class="loading-message">
-          <div class="loading-spinner"></div>
-          Loading configuration...
-        </div>
-
-        <div v-else-if="error" class="error-message">
-          {{ error }}
-          <button @click="loadConfiguration" class="retry-button">Retry</button>
-        </div>
-
-        <div v-else-if="config" class="config-display">
-          <div class="config-actions">
-            <button @click="openConfigEditor" class="edit-config-button">
-              ⚙️ Edit Configuration
-            </button>
-            <button @click="loadConfiguration" class="refresh-button">
-              🔄 Refresh
-            </button>
-          </div>
-
-          <div class="config-viewer">
-            <h3>Current Configuration</h3>
-            <pre class="config-text">{{ JSON.stringify(JSON.parse(config), null, 2) }}</pre>
-          </div>
-        </div>
-
-        <div v-else>
-          <button @click="loadConfiguration" class="load-config-button">
-            Load Configuration
-          </button>
+        <!-- Inline Configuration Editor -->
+        <div class="inline-config-editor">
+          <ConfigEditor :user="user" :inline="true" />
         </div>
       </div>
 
@@ -236,14 +196,6 @@ onMounted(() => {
         </div>
       </div>
     </main>
-
-    <!-- Configuration Editor Modal -->
-    <div v-if="showConfigEditor" class="config-modal">
-      <div class="config-modal-backdrop" @click="closeConfigEditor"></div>
-      <div class="config-modal-content">
-        <ConfigEditor :user="user" @close="closeConfigEditor" />
-      </div>
-    </div>
   </div>
 </template>
 
@@ -623,5 +575,11 @@ onMounted(() => {
   .dashboard-main {
     padding: 1rem;
   }
+}
+
+.config-content {
+  background: #f8fafc;
+  min-height: calc(100vh - 200px);
+  padding: 1.5rem;
 }
 </style>

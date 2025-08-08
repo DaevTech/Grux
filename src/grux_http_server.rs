@@ -96,7 +96,7 @@ fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = (
                 async move {
                     let svc = service_fn(move |req| handle_request(req, binding.clone()));
                     if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
-                        println!("Error serving connection: {:?}", err);
+                        trace!("Error serving connection: {:?}", err);
                     }
                 }
             });
@@ -152,7 +152,7 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: Binding) -
     );
     trace!("Matched site with request: {:?}", site);
 
-        // First, check if there is a specific file requested
+    // First, check if there is a specific file requested
     let web_root = &site.web_root;
 
     // Check if if request is for path or file

@@ -6,6 +6,10 @@ const props = defineProps({
   user: {
     type: Object,
     required: true
+  },
+  inline: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -280,9 +284,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="config-editor">
+  <div :class="inline ? 'config-editor-inline' : 'config-editor'">
     <!-- Header -->
-    <div class="config-header">
+    <div v-if="!inline" class="config-header">
       <h2>Configuration Editor</h2>
       <div class="config-actions">
         <button
@@ -301,13 +305,34 @@ onMounted(() => {
           <span v-if="isSaving">Saving...</span>
           <span v-else>Save Configuration</span>
         </button>
-        <button @click="emit('close')" class="close-button">
+        <button v-if="!inline" @click="emit('close')" class="close-button">
           Close
         </button>
       </div>
     </div>
 
-    <!-- Loading State -->
+    <!-- Inline Header -->
+    <div v-if="inline" class="inline-config-header">
+      <h2>Server Configuration</h2>
+      <div class="inline-config-actions">
+        <button
+          v-if="hasUnsavedChanges"
+          @click="resetChanges"
+          class="reset-button inline"
+          :disabled="isSaving"
+        >
+          Reset Changes
+        </button>
+        <button
+          @click="saveConfiguration"
+          class="save-button inline"
+          :disabled="isSaving || !hasUnsavedChanges"
+        >
+          <span v-if="isSaving">Saving...</span>
+          <span v-else>Save Configuration</span>
+        </button>
+      </div>
+    </div>    <!-- Loading State -->
     <div v-if="isLoading" class="loading-message">
       <div class="loading-spinner"></div>
       Loading configuration...
@@ -533,6 +558,17 @@ onMounted(() => {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+.config-editor-inline {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
 /* New visual hierarchy styles */
 .section-title-icon {
   font-size: 1.25rem;
@@ -621,6 +657,7 @@ onMounted(() => {
 .item-header.compact {
   padding: 0.1rem 1rem;
   cursor: pointer;
+  min-height:40px;
 }
 
 .item-header.compact:hover {
@@ -653,8 +690,9 @@ onMounted(() => {
 }
 
 .remove-button.compact.small {
-  padding: 0.375rem 0.625rem;
+  padding: 0.175rem 0.625rem;
   font-size: 0.75rem;
+  min-height: 30px;
 }
 
 .item-summary {
@@ -681,6 +719,17 @@ onMounted(() => {
   border-bottom: none;
 }
 
+.inline-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0 1.5rem 0;
+  background: transparent;
+  color: #1e293b;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 1.5rem;
+}
+
 .config-header h2 {
   margin: 0;
   color: white;
@@ -688,9 +737,22 @@ onMounted(() => {
   font-weight: 700;
 }
 
+.inline-config-header h2 {
+  margin: 0;
+  color: #1e293b;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
 .config-actions {
   display: flex;
   gap: 1rem;
+  align-items: center;
+}
+
+.inline-config-actions {
+  display: flex;
+  gap: 0.75rem;
   align-items: center;
 }
 
@@ -704,6 +766,12 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+.save-button.inline {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
 }
 
 .save-button:disabled {
@@ -727,6 +795,12 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);
+}
+
+.reset-button.inline {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
 }
 
 .reset-button:hover {
