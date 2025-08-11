@@ -32,7 +32,7 @@ pub struct Sites {
 pub struct Configuration {
     pub servers: Vec<Server>,
     pub admin_site: AdminSite,
-    pub file_cache: FileCache,
+    pub core: Core,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,7 +48,21 @@ pub struct AdminSite {
 pub struct FileCache {
     pub is_enabled: bool,
     pub cache_size: usize,
-    pub cache_lifetime: usize,
+    pub cache_max_size_per_file: usize,
+    pub cache_max_item_lifetime: usize,
+    pub cleanup_thread_interval: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Gzip {
+    pub is_enabled: bool,
+    pub compressible_content_types: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Core {
+    pub file_cache: FileCache,
+    pub gzip: Gzip,
 }
 
 impl Configuration {
@@ -82,14 +96,34 @@ impl Configuration {
 
         let file_cache = FileCache {
             is_enabled: true,
-            cache_size: 1024 * 1024 * 100, // 100 MB
-            cache_lifetime: 60,            // 60 seconds
+            cache_size: 1024 * 1024 * 100,
+            cache_max_size_per_file: 1024 * 1024 * 1,
+            cache_max_item_lifetime: 60,    // seconds
+            cleanup_thread_interval: 10,     // seconds
+        };
+
+        let gzip = Gzip {
+            is_enabled: true,
+            compressible_content_types: vec![
+                "text/plain".to_string(),
+                "text/html".to_string(),
+                "application/json".to_string(),
+                "application/javascript".to_string(),
+                "application/xml".to_string(),
+                "text/css".to_string(),
+                "image/svg+xml".to_string(),
+            ],
+        };
+
+        let core = Core {
+            file_cache: file_cache,
+            gzip: gzip,
         };
 
         Configuration {
             servers: vec![default_server],
             admin_site,
-            file_cache,
+            core,
         }
     }
 

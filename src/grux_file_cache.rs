@@ -1,6 +1,7 @@
+use crate::grux_configuration_struct::FileCache as GruxFileCacheConfig;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use log::{debug, trace, warn};
+use log::{info, trace, warn};
 use std::io::Write;
 use std::{
     collections::HashMap,
@@ -11,8 +12,11 @@ use std::{
 use tokio::time::interval;
 
 pub struct FileCache {
+    is_enabled: bool,
     cache: Arc<RwLock<HashMap<String, CachedFile>>>,
     max_file_size: u64,
+    gzip_enabled: bool,
+    compressible_content_types: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -27,28 +31,44 @@ pub struct CachedFile {
     pub gzip_content: Vec<u8>,
 }
 
-const COMPRESSIBLE_TYPES: [&'static str; 7] = ["text/", "application/json", "application/javascript", "application/xml", "application/css", "text/css", "image/svg+xml"];
-
-// Configuration constants for cache cleanup
-const CLEANUP_INTERVAL_SECONDS: u64 = 10;
-const CACHE_ENTRY_MAX_AGE_SECONDS: u64 = 30;
-
 impl FileCache {
     /// Create a new file cache with specified capacity and max file size
     /// capacity: Maximum number of files to cache
     /// max_file_size: Maximum size of individual files to cache (in bytes)
-    pub fn new(capacity: usize, max_file_size: u64) -> Self {
-        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
+    pub fn new() -> Self {
+        // Get configuration
+        let config = crate::grux_configuration::get_configuration();
+        let file_data_config: GruxFileCacheConfig = config.get("core.file_cache").unwrap();
 
-        let cache = Arc::new(RwLock::new(HashMap::with_capacity(capacity.get())));
+        let is_enabled = file_data_config.is_enabled;
+        let max_file_size = file_data_config.cache_max_size_per_file as u64;
+        let capacity = file_data_config.cache_size;
+        let max_item_lifetime = file_data_config.cache_max_item_lifetime;
+        let cleanup_thread_interval = file_data_config.cleanup_thread_interval;
+
+        let compressible_content_types = config.get::<Vec<String>>("core.gzip.compressible_content_types").unwrap_or(vec![]);
+        let gzip_enabled = config.get_bool("core.gzip.is_enabled").unwrap_or(false);
+
+        let mut hashmap = HashMap::with_capacity(0);
+        if is_enabled {
+            hashmap = HashMap::with_capacity(NonZeroUsize::new(capacity).unwrap().get());
+        }
+
+        let cache = Arc::new(RwLock::new(hashmap));
 
         // Start the cleanup thread
         let cache_clone_clean = cache.clone();
         tokio::spawn(async move {
-            Self::cleanup_thread_static(cache_clone_clean).await;
+            Self::cleanup_thread_static(cache_clone_clean, max_item_lifetime, cleanup_thread_interval).await;
         });
 
-        Self { cache, max_file_size }
+        Self {
+            is_enabled,
+            cache,
+            max_file_size,
+            compressible_content_types,
+            gzip_enabled,
+        }
     }
 
     // Get file data
@@ -113,38 +133,46 @@ impl FileCache {
                 gzip_content: gzip_content,
             };
 
-            trace!("New cached file/dir: {:?}", new_cached_file);
+            if self.is_enabled {
+                trace!("New cached file/dir: {:?}", new_cached_file);
+                self.cache.write().unwrap().insert(file_path.to_string(), new_cached_file.clone());
+            }
 
-            self.cache.write().unwrap().insert(file_path.to_string(), new_cached_file.clone());
             return Ok(new_cached_file);
         }
     }
 
     /// Check if a MIME type should be compressed
     fn should_compress(&self, mime_type: &str) -> bool {
-        COMPRESSIBLE_TYPES.iter().any(|&ct| mime_type.starts_with(ct))
+        if self.gzip_enabled {
+            return self.compressible_content_types.iter().any(|ct| mime_type.starts_with(ct));
+        }
+        false
     }
 
     /// Background cleanup thread that periodically removes old cache entries
-    async fn cleanup_thread_static(cache: Arc<RwLock<HashMap<String, CachedFile>>>) {
-        let mut interval = interval(Duration::from_secs(CLEANUP_INTERVAL_SECONDS));
+    async fn cleanup_thread_static(cache: Arc<RwLock<HashMap<String, CachedFile>>>, max_item_lifetime: usize, cleanup_thread_interval: usize) {
+        let mut interval = interval(Duration::from_secs(cleanup_thread_interval as u64));
 
         loop {
             interval.tick().await;
 
-            let cache_bytes_used: usize = cache.read().unwrap().values().map(|f| f.content.len() + f.gzip_content.len()).sum();
+            let cache_read = cache.read().unwrap();
+
+            // Figure out how many bytes are currently used and how many items are in the cache
+            let cache_bytes_used: usize = cache_read.values().map(|f| f.content.len() + f.gzip_content.len()).sum();
+            drop(cache_read);
 
             let now = std::time::Instant::now();
-            let max_age = Duration::from_secs(CACHE_ENTRY_MAX_AGE_SECONDS);
+            let max_age = Duration::from_secs(max_item_lifetime as u64);
 
             // Get write lock and remove old entries
             if let Ok(mut cache_map) = cache.write() {
                 let initial_count = cache_map.len();
 
-                cache_map.retain(|path, cached_file| {
+                cache_map.retain(|_path, cached_file| {
                     let age = now.duration_since(cached_file.last_checked);
                     if age > max_age {
-                        trace!("Removing expired cache entry: {} (age: {:?})", path, age);
                         false
                     } else {
                         true
@@ -156,7 +184,7 @@ impl FileCache {
 
                 let cache_bytes_used_after: usize = cache_map.values().map(|f| f.content.len() + f.gzip_content.len()).sum();
 
-                debug!(
+                info!(
                     "Memory file data cache cleanup: removed {} expired, {} remaining. Cache size: {} bytes -> {} bytes",
                     removed_count, final_count, cache_bytes_used, cache_bytes_used_after
                 );
@@ -176,8 +204,7 @@ impl FileCache {
 // Global file cache instance
 lazy_static::lazy_static! {
     static ref GLOBAL_FILE_CACHE: FileCache = {
-        // Cache up to 1000 files, max 1MB per file, but very likely to be less than max used
-        FileCache::new(1000, 1 * 1024 * 1024)
+        FileCache::new()
     };
 }
 
