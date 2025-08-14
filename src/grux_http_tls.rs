@@ -1,6 +1,7 @@
 use crate::grux_configuration::{get_current_configuration_from_db, save_configuration};
 use crate::grux_configuration_struct::*;
 use log::{info, warn};
+use rand::Rng;
 use rustls_pki_types::pem::PemObject; // for from_pem_file, etc.
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tls_listener::rustls as tokio_rustls;
@@ -18,14 +19,12 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Sites, cer
     let dir = "certs";
     fs::create_dir_all(dir).await?;
 
-    // Sanitize for filename
-    let mut ip_part = binding.ip.replace(':', "_");
-    if ip_part.is_empty() {
-        ip_part = "unknown".to_string();
-    }
-    let site_part = site.hostnames.iter().find(|h| h.as_str() != "*").cloned().unwrap_or_else(|| "any".to_string()).replace('*', "star");
-    let cert_path = format!("{}/site_{}_{}_{}.crt.pem", dir, ip_part, binding.port, site_part);
-    let key_path = format!("{}/site_{}_{}_{}.key.pem", dir, ip_part, binding.port, site_part);
+    // Generate a random number for this cert
+    let mut rng = rand::rng();
+    let random_number: u32 = rng.random();
+
+    let cert_path = format!("{}/{}.crt.pem", dir, random_number);
+    let key_path = format!("{}/{}.key.pem", dir, random_number);
 
     // Write files atomically: write to temp then rename
     let cert_tmp = format!("{}.tmp", &cert_path);
@@ -47,33 +46,37 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Sites, cer
 
     // Update configuration in DB so future runs use persisted files
     // Best-effort; failures shouldn't block startup
-    match get_current_configuration_from_db() {
-        Ok(mut cfg) => {
-            let mut updated = false;
-            // Update matching binding and site
-            for server in cfg.servers.iter_mut() {
-                for b in server.bindings.iter_mut() {
-                    if b.ip == binding.ip && b.port == binding.port && b.is_admin == binding.is_admin {
-                        b.is_tls = true;
-                        for s in b.sites.iter_mut() {
-                            if s.web_root == site.web_root && s.hostnames == site.hostnames {
-                                s.tls_cert_path = Some(cert_path.clone());
-                                s.tls_key_path = Some(key_path.clone());
-                                updated = true;
-                            }
-                        }
+    let mut configuration = get_current_configuration_from_db().map_err(|e| format!("Failed to load current configuration for TLS persistence: {}", e))?;
+
+    let mut updated = false;
+    for server in configuration.servers.iter_mut() {
+        for b in server.bindings.iter_mut() {
+            if b.ip == binding.ip && b.port == binding.port && b.is_admin == binding.is_admin {
+                b.is_tls = true;
+                for s in b.sites.iter_mut() {
+                    if s.web_root == site.web_root && s.hostnames == site.hostnames {
+                        s.tls_cert_path = Some(cert_path.clone());
+                        s.tls_key_path = Some(key_path.clone());
+                        updated = true;
+                        break;
                     }
                 }
-            }
-            if updated {
-                if let Err(e) = save_configuration(&cfg) {
-                    warn!("Failed to persist TLS paths to configuration: {}", e);
-                } else {
-                    info!("Persisted generated TLS certificate and key to configuration.");
+                if updated {
+                    break;
                 }
             }
         }
-        Err(e) => warn!("Failed to load configuration for TLS path persistence: {}", e),
+        if updated {
+            break;
+        }
+    }
+
+    if updated {
+        if let Err(e) = save_configuration(&configuration) {
+            warn!("Failed to persist TLS paths to configuration: {}", e);
+        } else {
+            info!("Persisted generated TLS certificate and key to configuration.");
+        }
     }
 
     Ok((cert_path, key_path))

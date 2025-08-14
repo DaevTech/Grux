@@ -45,10 +45,6 @@ pub struct Configuration {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AdminSite {
     pub is_admin_portal_enabled: bool,
-    pub admin_portal_ip: String,
-    pub admin_portal_port: u16,
-    pub admin_portal_web_root: String,
-    pub admin_portal_index_file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,6 +84,26 @@ impl Configuration {
             tls_key_path: None,
         };
 
+        let admin_site = Sites {
+            hostnames: vec!["*".to_string()],
+            is_default: true,
+            is_enabled: true,
+            is_tls: true,
+            is_tls_required: true,
+            web_root: "./www-admin".to_string(),
+            web_root_index_file_list: vec!["index.html".to_string()],
+            tls_cert_path: None,
+            tls_key_path: None,
+        };
+
+        let admin_binding = Binding {
+            ip: "0.0.0.0".to_string(),
+            port: 8000,
+            is_admin: true,
+            is_tls: true,
+            sites: vec![admin_site],
+        };
+
         let default_binding = Binding {
             ip: "0.0.0.0".to_string(),
             port: 80,
@@ -97,13 +113,10 @@ impl Configuration {
         };
 
         let default_server = Server { bindings: vec![default_binding] };
+        let admin_server = Server { bindings: vec![admin_binding] };
 
         let admin_site = AdminSite {
             is_admin_portal_enabled: true,
-            admin_portal_ip: "0.0.0.0".to_string(),
-            admin_portal_port: 8000,
-            admin_portal_web_root: "./www-admin".to_string(),
-            admin_portal_index_file: "index.html".to_string(),
         };
 
         let file_cache = FileCache {
@@ -130,7 +143,7 @@ impl Configuration {
         let core = Core { file_cache: file_cache, gzip: gzip };
 
         Configuration {
-            servers: vec![default_server],
+            servers: vec![default_server, admin_server],
             admin_site,
             core,
         }
@@ -272,32 +285,8 @@ impl Sites {
 
 impl AdminSite {
     pub fn validate(&self) -> Result<(), Vec<String>> {
-        let mut errors = Vec::new();
+        let errors = Vec::new();
 
-        // Validate IP address
-        if self.admin_portal_ip.is_empty() {
-            errors.push("Admin portal IP address cannot be empty".to_string());
-        } else if self.admin_portal_ip.parse::<std::net::IpAddr>().is_err() {
-            errors.push(format!("Invalid admin portal IP address: {}", self.admin_portal_ip));
-        }
-
-        // Validate port
-        if self.admin_portal_port == 0 {
-            errors.push("Admin portal port cannot be 0".to_string());
-        }
-
-        // Validate web root
-        if self.admin_portal_web_root.trim().is_empty() {
-            errors.push("Admin portal web root cannot be empty".to_string());
-        }
-        if self.admin_portal_web_root.ends_with("/") {
-            errors.push("Admin portal web root cannot end with a slash".to_string());
-        }
-
-        // Validate index file
-        if self.admin_portal_index_file.trim().is_empty() {
-            errors.push("Admin portal index file cannot be empty".to_string());
-        }
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }

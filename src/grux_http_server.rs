@@ -1,6 +1,6 @@
+use crate::grux_configuration::*;
 use crate::grux_configuration_struct::*;
 use crate::grux_http_handle_request::*;
-use crate::grux_configuration::*;
 use crate::grux_http_tls::build_tls_acceptor;
 use futures::future::join_all;
 use hyper::server::conn::http1;
@@ -8,8 +8,8 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use log::{error, info, trace, warn};
 use std::net::SocketAddr;
-use tokio::net::TcpListener;
 use tls_listener::builder as tls_builder;
+use tokio::net::TcpListener;
 
 // Main function, starting all the Grux magic
 #[tokio::main(flavor = "multi_thread")]
@@ -24,39 +24,9 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
         return Err("No servers configured".into());
     }
 
-    let mut started_servers = Vec::new();
-
-    // Starting the admin server, if enabled
     let admin_site_config: AdminSite = config.get("admin_site").unwrap();
 
-    if admin_site_config.is_admin_portal_enabled {
-
-        let admin_binding = Binding {
-            ip: admin_site_config.admin_portal_ip.clone(),
-            port: admin_site_config.admin_portal_port,
-            is_admin: true,
-            // Admin must be TLS-only
-            is_tls: true,
-            sites: vec![Sites {
-                hostnames: vec!["*".to_string()],
-                is_default: true,
-                is_enabled: true,
-                is_tls: true,
-                is_tls_required: true,
-                web_root: admin_site_config.admin_portal_web_root.clone(),
-                web_root_index_file_list: vec![admin_site_config.admin_portal_index_file.clone()],
-                tls_cert_path: None,
-                tls_key_path: None,
-            }],
-        };
-
-        let admin_server = start_server_binding(admin_binding);
-        started_servers.push(admin_server);
-
-        info!("Starting Grux admin server on {}:{}", admin_site_config.admin_portal_ip, admin_site_config.admin_portal_port);
-    } else {
-        info!("Grux admin portal is disabled in the configuration.");
-    }
+    let mut started_servers = Vec::new();
 
     // Starting the defined client servers
     for server in servers {
@@ -67,13 +37,23 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
 
             // Enforce admin bindings are TLS-only
             if binding.is_admin && !binding.is_tls {
-                warn!("Admin binding requested without TLS on {}:{}, forcing TLS on.", binding.ip, binding.port);
+                warn!("Admin binding requested without TLS on {}:{}. This is not recommended.", binding.ip, binding.port);
             }
+
+            if binding.is_admin {
+                if admin_site_config.is_admin_portal_enabled {
+                    info!("Starting Grux admin server on {}", addr);
+                } else {
+                    warn!("Grux admin portal is disabled in the configuration.");
+                }
+            } else {
+                // Non-admin server
+                info!("Starting Grux server on {}", addr);
+            }
+
             // Start listening on the specified address
             let server = start_server_binding(binding);
             started_servers.push(server);
-
-            info!("Starting Grux server on {}", addr);
         }
     }
 
