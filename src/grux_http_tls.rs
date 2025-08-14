@@ -174,8 +174,8 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
         .with_no_client_auth()
         .with_cert_resolver(std::sync::Arc::new(resolver));
 
-    // Enable http/1.1 ALPN
-    server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    // Enable ALPN for HTTP/2 and HTTP/1.1 (prefer h2)
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     Ok(TlsAcceptor::from(std::sync::Arc::new(server_config)))
 }

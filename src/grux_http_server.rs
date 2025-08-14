@@ -3,13 +3,13 @@ use crate::grux_configuration_struct::*;
 use crate::grux_http_handle_request::*;
 use crate::grux_http_tls::build_tls_acceptor;
 use futures::future::join_all;
-use hyper::server::conn::http1;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{error, info, trace, warn};
 use std::net::SocketAddr;
-use tls_listener::builder as tls_builder;
 use tokio::net::TcpListener;
+use tls_listener::rustls as tokio_rustls;
 
 // Main function, starting all the Grux magic
 #[tokio::main(flavor = "multi_thread")]
@@ -73,7 +73,7 @@ fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = (
         trace!("Listening on binding: {:?}", binding);
 
         if binding.is_tls {
-            // TLS path using tls-listener
+            // TLS path using tokio-rustls so we can inspect ALPN to choose HTTP/2 vs HTTP/1.1
             let acceptor = match build_tls_acceptor(&binding).await {
                 Ok(a) => a,
                 Err(e) => {
@@ -81,27 +81,34 @@ fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = (
                     return;
                 }
             };
-            // Wrap TCP listener
-            let mut tls_listener = tls_builder(acceptor).listen(listener);
             loop {
-                match tls_listener.accept().await {
-                    Ok((tls_stream, _peer)) => {
-                        tokio::task::spawn({
-                            let binding = binding.clone();
-                            async move {
+                let (tcp_stream, _) = listener.accept().await.unwrap();
+                let acceptor = acceptor.clone();
+                tokio::task::spawn({
+                    let binding = binding.clone();
+                    async move {
+                        match acceptor.accept(tcp_stream).await {
+                            Ok(tls_stream) => {
+                                // Decide protocol based on ALPN
+                                let is_h2 = negotiated_h2(&tls_stream);
                                 let io = TokioIo::new(tls_stream);
                                 let svc = service_fn(move |req| handle_request(req, binding.clone()));
-                                if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
-                                    trace!("TLS error serving connection: {:?}", err);
+                                if is_h2 {
+                                    if let Err(err) = http2::Builder::new(TokioExecutor::new()).serve_connection(io, svc).await {
+                                        trace!("TLS h2 error serving connection: {:?}", err);
+                                    }
+                                } else {
+                                    if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
+                                        trace!("TLS http1.1 error serving connection: {:?}", err);
+                                    }
                                 }
                             }
-                        });
+                            Err(err) => {
+                                trace!("TLS handshake error: {:?}", err);
+                            }
+                        }
                     }
-                    Err(err) => {
-                        trace!("TLS accept error: {:?}", err);
-                        continue;
-                    }
-                }
+                });
             }
         } else {
             // Non-TLS path
@@ -120,5 +127,15 @@ fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = (
                 });
             }
         }
+    }
+}
+
+// Determine if ALPN negotiated h2 for a rustls TLS stream
+fn negotiated_h2(stream: &tokio_rustls::server::TlsStream<tokio::net::TcpStream>) -> bool {
+    // get_ref returns (IO, Connection)
+    let (_io, conn) = stream.get_ref();
+    match conn.alpn_protocol() {
+        Some(proto) => proto == b"h2",
+        None => false,
     }
 }
