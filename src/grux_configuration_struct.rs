@@ -25,6 +25,7 @@ pub struct Sites {
     pub is_enabled: bool,
     pub web_root: String,
     pub web_root_index_file_list: Vec<String>,
+    pub enabled_handlers: Vec<String>,  // List of enabled handler IDs for this site
     // Optional PEM file paths for this specific site; if not provided and served over TLS, a self-signed cert may be generated
     #[serde(default)]
     pub tls_cert_path: Option<String>,
@@ -38,6 +39,7 @@ pub struct Configuration {
     pub servers: Vec<Server>,
     pub admin_site: AdminSite,
     pub core: Core,
+    pub request_handlers: Vec<RequestHandler>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +70,19 @@ pub struct Core {
     pub gzip: Gzip,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RequestHandler {
+    pub id: String, // Generated id, unique, so it can be referenced from sites as a handler
+    pub is_enabled: bool,   // Whether it is enabled or not
+    pub name: String,   // A name to identify the handler, self chosen
+    pub handler_type: String, // e.g., "php", "python", etc. Used by the handlers to identify if they should handle requests
+    pub request_timeout: usize, // Seconds
+    pub max_concurrent_requests: usize,
+    pub file_match: Vec<String>,    // .php, .html, etc
+    pub extra_handler_config: Vec<(String, String)>, // Key/value pairs for extra handler configuration
+    pub extra_environment: Vec<(String, String)>,   // Key/value pairs to add to environment, passed on to the handler
+}
+
 impl Configuration {
     pub fn new() -> Self {
         let default_site = Sites {
@@ -76,6 +91,7 @@ impl Configuration {
             is_enabled: true,
             web_root: "./www-default".to_string(),
             web_root_index_file_list: vec!["index.html".to_string()],
+            enabled_handlers: vec!["php_handler".to_string()], // No specific handlers enabled by default
             tls_cert_path: None,
             tls_key_path: None,
         };
@@ -86,6 +102,7 @@ impl Configuration {
             is_enabled: true,
             web_root: "./www-admin".to_string(),
             web_root_index_file_list: vec!["index.html".to_string()],
+            enabled_handlers: vec![], // No specific handlers enabled by default
             tls_cert_path: None,
             tls_key_path: None,
         };
@@ -136,10 +153,25 @@ impl Configuration {
 
         let core = Core { file_cache: file_cache, gzip: gzip };
 
+        let request_handlers = vec![
+            RequestHandler {
+                id: "php_handler".to_string(),
+                is_enabled: true,
+                name: "PHP Handler".to_string(),
+                handler_type: "php".to_string(),
+                request_timeout: 30, // seconds
+                max_concurrent_requests: 10,
+                file_match: vec![".php".to_string()],
+                extra_handler_config: vec![],
+                extra_environment: vec![],
+            },
+        ];
+
         Configuration {
             servers: vec![default_server, admin_server],
             admin_site,
             core,
+            request_handlers,
         }
     }
 

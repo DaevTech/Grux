@@ -1,7 +1,8 @@
 use grux::grux_configuration;
+use grux::grux_database;
+use grux::grux_external_request_handlers;
 use grux::grux_http_server;
 use grux::grux_log;
-use grux::grux_database;
 use log::{error, info};
 
 fn main() {
@@ -24,19 +25,21 @@ fn main() {
         error!("Failed to load configuration: {}", e);
         std::process::exit(1);
     }
-    info!("Configuration loaded successfully.");
+    info!("Configuration loaded");
 
     // Initialize database tables and migrations
     if let Err(e) = grux_database::initialize_database() {
         error!("Failed to initialize database: {}", e);
         std::process::exit(1);
     }
-    info!("Database initialized successfully.");
+    info!("Database initialized");
 
-    // Load the admin services endpoints
+    // Initialize any external handlers, such as PHP, if needed
+    grux_external_request_handlers::get_request_handlers();
+    info!("External request handlers initialized");
 
     // Init server bindings and start serving those bits
-    if let Err(e) = crate::grux_http_server::initialize_server() {
+    if let Err(e) = grux_http_server::initialize_server() {
         error!("Error initializing server: {}", e);
         std::process::exit(1);
     }

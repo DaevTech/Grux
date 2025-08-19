@@ -104,6 +104,10 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
         }
     }
 
+    // We check if is a request we need to handle another way
+
+
+
     let mut additional_headers: Vec<(&str, &str)> = vec![("Content-Type", &file_data.mime_type)];
 
     // Gzip body or raw content
