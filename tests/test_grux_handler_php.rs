@@ -1,4 +1,5 @@
-use grux::grux_external_request_handlers::grux_handler_php::{PHPHandler, PhpCgiProcess};
+use grux::grux_external_request_handlers::grux_handler_php::PHPHandler;
+use grux::grux_external_request_handlers::grux_php_cgi_process::PhpCgiProcess;
 use grux::grux_external_request_handlers::ExternalRequestHandler;
 use grux::grux_port_manager::PortManager;
 

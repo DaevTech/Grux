@@ -7,6 +7,7 @@ use hyper::Request;
 use log::debug;
 use std::{collections::HashMap, sync::OnceLock};
 pub mod grux_handler_php;
+pub mod grux_php_cgi_process;
 
 pub struct ExternalRequestHandlers {
     handlers: Vec<Box<dyn ExternalRequestHandler>>,

@@ -220,6 +220,23 @@ impl Configuration {
             }
         }
 
+        // Validate request handlers
+        for (handler_idx, handler) in self.request_handlers.iter().enumerate() {
+            if let Err(handler_errors) = handler.validate() {
+                for error in handler_errors {
+                    errors.push(format!("Request Handler {}: {}", handler_idx + 1, error));
+                }
+            }
+        }
+
+        // Check for duplicate request handler IDs
+        let mut handler_ids = std::collections::HashSet::new();
+        for handler in &self.request_handlers {
+            if !handler_ids.insert(&handler.id) {
+                errors.push(format!("Duplicate request handler ID: '{}'", handler.id));
+            }
+        }
+
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 }
@@ -463,9 +480,129 @@ impl Gzip {
                 errors.push(format!("Content type {} cannot be empty", content_type_idx + 1));
             }
 
-            // Basic validation for content type format
-            if !content_type.contains('/') && !content_type.ends_with('/') {
-                errors.push(format!("Content type '{}' appears to be invalid format (should contain '/' or end with '/')", content_type));
+        // Basic validation for content type format
+        if !content_type.contains('/') && !content_type.ends_with('/') {
+            errors.push(format!("Content type '{}' appears to be invalid format (should contain '/' or end with '/')", content_type));
+        }
+    }
+
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+}
+
+impl RequestHandler {
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Validate ID
+        if self.id.trim().is_empty() {
+            errors.push("Request handler ID cannot be empty".to_string());
+        } else if self.id.trim().len() < 3 {
+            errors.push("Request handler ID must be at least 3 characters long".to_string());
+        } else if !self.id.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            errors.push("Request handler ID can only contain alphanumeric characters, underscores, and hyphens".to_string());
+        }
+
+        // Validate name
+        if self.name.trim().is_empty() {
+            errors.push("Request handler name cannot be empty".to_string());
+        }
+
+        // Validate handler type
+        if self.handler_type.trim().is_empty() {
+            errors.push("Handler type cannot be empty".to_string());
+        } else {
+            // Validate known handler types
+            let valid_types = ["php", "python", "node", "static", "proxy"];
+            if !valid_types.contains(&self.handler_type.trim()) {
+                errors.push(format!("Unknown handler type '{}'. Valid types are: {}",
+                    self.handler_type, valid_types.join(", ")));
+            }
+        }
+
+        // Validate request timeout
+        if self.request_timeout == 0 {
+            errors.push("Request timeout cannot be 0 seconds".to_string());
+        } else if self.request_timeout > 3600 {
+            errors.push("Request timeout cannot exceed 3600 seconds (1 hour)".to_string());
+        }
+
+        // Validate max concurrent requests
+        if self.max_concurrent_requests == 0 {
+            errors.push("Max concurrent requests cannot be 0".to_string());
+        } else if self.max_concurrent_requests > 1000 {
+            errors.push("Max concurrent requests cannot exceed 1000".to_string());
+        }
+
+        // Validate file match patterns
+        if self.file_match.is_empty() {
+            errors.push("File match patterns cannot be empty".to_string());
+        } else {
+            for (pattern_idx, pattern) in self.file_match.iter().enumerate() {
+                if pattern.trim().is_empty() {
+                    errors.push(format!("File match pattern {} cannot be empty", pattern_idx + 1));
+                } else if !pattern.starts_with('.') && !pattern.starts_with('*') {
+                    errors.push(format!("File match pattern '{}' should start with '.' or '*'", pattern));
+                }
+            }
+        }
+
+        // Validate executable path
+        if self.executable.trim().is_empty() {
+            errors.push("Executable path cannot be empty".to_string());
+        }
+
+        // Validate IP and port
+        if self.ip_and_port.trim().is_empty() {
+            errors.push("IP and port cannot be empty".to_string());
+        } else {
+            // Basic format validation for IP:port
+            if !self.ip_and_port.contains(':') {
+                errors.push("IP and port must be in format 'IP:PORT'".to_string());
+            } else {
+                let parts: Vec<&str> = self.ip_and_port.split(':').collect();
+                if parts.len() != 2 {
+                    errors.push("IP and port must be in format 'IP:PORT'".to_string());
+                } else {
+                    // Validate IP part
+                    if parts[0].parse::<std::net::IpAddr>().is_err() {
+                        errors.push(format!("Invalid IP address in '{}': {}", self.ip_and_port, parts[0]));
+                    }
+
+                    // Validate port part
+                    if let Ok(port) = parts[1].parse::<u16>() {
+                        if port == 0 {
+                            errors.push("Port cannot be 0".to_string());
+                        }
+                    } else {
+                        errors.push(format!("Invalid port in '{}': {}", self.ip_and_port, parts[1]));
+                    }
+                }
+            }
+        }
+
+        // Validate extra handler config
+        for (config_idx, (key, value)) in self.extra_handler_config.iter().enumerate() {
+            if key.trim().is_empty() {
+                errors.push(format!("Extra handler config key {} cannot be empty", config_idx + 1));
+            }
+            if value.trim().is_empty() {
+                errors.push(format!("Extra handler config value {} cannot be empty", config_idx + 1));
+            }
+        }
+
+        // Validate extra environment variables
+        for (env_idx, (key, value)) in self.extra_environment.iter().enumerate() {
+            if key.trim().is_empty() {
+                errors.push(format!("Environment variable key {} cannot be empty", env_idx + 1));
+            }
+            if value.trim().is_empty() {
+                errors.push(format!("Environment variable value {} cannot be empty", env_idx + 1));
+            }
+
+            // Check for valid environment variable name format
+            if !key.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                errors.push(format!("Environment variable key '{}' can only contain alphanumeric characters and underscores", key));
             }
         }
 
