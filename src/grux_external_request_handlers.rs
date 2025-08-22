@@ -78,6 +78,8 @@ fn start_external_request_handlers() -> Result<ExternalRequestHandlers, String> 
         match handler_type.as_str() {
             "php" => {
                 let php_handler = PHPHandler::new(
+                    handler.executable.clone(),
+                    handler.ip_and_port.clone(),
                     handler.request_timeout,
                     handler.max_concurrent_requests,
                     handler.extra_handler_config,

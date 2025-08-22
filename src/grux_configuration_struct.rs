@@ -79,6 +79,8 @@ pub struct RequestHandler {
     pub request_timeout: usize, // Seconds
     pub max_concurrent_requests: usize,
     pub file_match: Vec<String>,    // .php, .html, etc
+    pub executable: String, // Path to the executable or script that handles the request, like php-cgi.exe location for PHP on windows
+    pub ip_and_port: String, // IP and port to connect to the handler, e.g. 127.0.0.1:9000 for FastCGI passthrough
     pub extra_handler_config: Vec<(String, String)>, // Key/value pairs for extra handler configuration
     pub extra_environment: Vec<(String, String)>,   // Key/value pairs to add to environment, passed on to the handler
 }
@@ -162,6 +164,8 @@ impl Configuration {
                 request_timeout: 30, // seconds
                 max_concurrent_requests: 10,
                 file_match: vec![".php".to_string()],
+                executable: "D:/php/8.2.9/php-cgi.exe".to_string(), // Path to the PHP CGI executable
+                ip_and_port: "127.0.0.1:9000".to_string(), // IP and port to connect to the handler
                 extra_handler_config: vec![],
                 extra_environment: vec![],
             },
