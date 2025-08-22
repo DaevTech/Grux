@@ -17,9 +17,15 @@ fn test_load_configuration_with_existing_config() {
     // Create copy of the database for testing
     let copied_db_path = "./temp_test_data/grux_test_existing.db";
     let original_db_path = "./grux.db";
+
+    if !Path::new("./temp_test_data").exists() {
+        fs::create_dir_all("./temp_test_data").unwrap();
+    }
+
     if Path::new(copied_db_path).exists() {
         fs::remove_file(copied_db_path).unwrap();
     }
+
     fs::copy(original_db_path, copied_db_path).unwrap();
 
     let result = grux_configuration::check_configuration();
