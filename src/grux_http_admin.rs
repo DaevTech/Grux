@@ -2,14 +2,14 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::BodyExt;
 use hyper::{Request, Response};
 use hyper::body::Bytes;
-use crate::grux_configuration_struct::Sites;
+use crate::grux_configuration_struct::Site;
 use crate::grux_http_util::{full};
 use crate::grux_database::{LoginRequest, authenticate_user, create_session, verify_session_token, invalidate_session};
 use log::{info, error, debug};
 use serde_json;
 
 
-pub async fn handle_login_request(req: Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+pub async fn handle_login_request(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check if this is a POST request
     if req.method() != hyper::Method::POST {
         let mut resp = Response::new(full("Method not allowed"));
@@ -88,7 +88,7 @@ pub async fn handle_login_request(req: Request<hyper::body::Incoming>, _admin_si
     Ok(resp)
 }
 
-pub async fn handle_logout_request(req: Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+pub async fn handle_logout_request(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check if this is a POST request
     if req.method() != hyper::Method::POST {
         let mut resp = Response::new(full("Method not allowed"));
@@ -134,7 +134,7 @@ pub async fn handle_logout_request(req: Request<hyper::body::Incoming>, _admin_s
     }
 }
 
-pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check authentication first
     match require_authentication(req).await {
         Ok(Some(_session)) => {
@@ -187,7 +187,7 @@ pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incomin
     }
 }
 
-pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incoming>, _admin_site: &Sites) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check if this is a POST request
     if req.method() != hyper::Method::POST {
         let mut resp = Response::new(full(r#"{"error": "Method not allowed"}"#));

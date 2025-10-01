@@ -10,6 +10,7 @@ fn test_php_handler_creation() {
         "127.0.0.1:9000".to_string(),
         30,
         2,
+        "./www-default".to_string(),
         vec![],
         vec![]
     );
@@ -56,6 +57,7 @@ fn test_php_handler_lifecycle() {
         "127.0.0.1:9000".to_string(),
         30,
         1,
+        "./www-default".to_string(),
         vec![],
         vec![]
     );
@@ -69,20 +71,21 @@ fn test_php_handler_lifecycle() {
 }
 
 #[test]
-fn test_port_allocation() {
+fn test_php_handler_concurrent_processing() {
     let handler = PHPHandler::new(
         "echo".to_string(),
         "127.0.0.1:9000".to_string(),
         30,
         3,
+        "./www-default".to_string(),
         vec![],
         vec![]
     );
 
-    // Test that port manager was initialized and handler can be created
+    // Test that handler can be created with multiple concurrent requests
     assert_eq!(handler.get_max_concurrent_requests(), 3);
 
-    // Test that we can call start and stop methods
+    // Start and stop the handler
     handler.start();
     handler.stop();
 }

@@ -46,23 +46,45 @@ pub fn get_full_file_path<P: AsRef<Path>>(input: P) -> std::io::Result<String> {
     Ok(result)
 }
 
-pub fn split_path(path_str: &str) -> (String, String) {
+/// Splits `path_str` into (relative_dir, file_name) based on `base_path`.
+/// - If `path_str` starts with `base_path`, returns the relative directory (with forward slashes, no leading slash) and file name.
+/// - If not, returns ("", file_name).
+pub fn split_path(base_path: &str, path_str: &str) -> (String, String) {
+    let base = Path::new(base_path).components().collect::<PathBuf>();
     let path = Path::new(path_str);
 
-    // Extract file part
-    let file = path.file_name()
+    // If path_str starts with base_path, strip base_path prefix
+    let rel = match path.strip_prefix(&base) {
+        Ok(rel) => rel,
+        Err(_) => path,
+    };
+
+    let file = rel.file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("")
-        .to_string();
+        .replace('\\', "/");
 
-    // Extract directory part
-    let dir = path.parent()
-        .map(|p| p.to_string_lossy().into_owned())
+    let dir = rel.parent()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| "".to_string());
 
-    // Normalize both to forward slashes in one pass
-    let dir = dir.replace('\\', "/");
-    let file = file.replace('\\', "/");
+    (dir.trim_start_matches('/').to_string(), file)
+}
 
-    (dir, file)
+// We expect all web roots to be cleaned, with forward slashes and absolute paths and should be able to handle replacing webroot from Windows to Unix style paths and vice versa
+pub fn replace_web_root_in_path(original_path: &str, old_web_root: &str, new_web_root: &str) -> String {
+    let old_web_root_cleaned = old_web_root.replace('\\', "/").trim_end_matches('/').to_string();
+    let new_web_root_cleaned = new_web_root.replace('\\', "/").trim_end_matches('/').to_string();
+
+    if original_path.starts_with(&old_web_root_cleaned) {
+        let relative_part = &original_path[old_web_root_cleaned.len()..];
+        let relative_part = relative_part.trim_start_matches('/'); // Remove leading slash if present
+        if relative_part.is_empty() {
+            new_web_root_cleaned.clone()
+        } else {
+            format!("{}/{}", new_web_root_cleaned, relative_part)
+        }
+    } else {
+        original_path.to_string() // Return original if it doesn't start with old web root
+    }
 }

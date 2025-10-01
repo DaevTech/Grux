@@ -14,7 +14,7 @@ use tokio_rustls::rustls::sign::CertifiedKey as RustlsCertifiedKey;
 use tokio_rustls::rustls::{self, ServerConfig as RustlsServerConfig};
 
 // Persist generated cert/key to disk and update configuration for a specific site
-pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Sites, cert_pem: &str, key_pem: &str) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert_pem: &str, key_pem: &str) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     // Ensure target directory exists
     let dir = "certs";
     fs::create_dir_all(dir).await?;

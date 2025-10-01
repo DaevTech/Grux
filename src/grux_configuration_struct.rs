@@ -14,12 +14,12 @@ pub struct Binding {
     pub is_admin: bool,
     #[serde(default)]
     pub is_tls: bool,
-    pub sites: Vec<Sites>,
+    pub sites: Vec<Site>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
-pub struct Sites {
+pub struct Site {
     pub hostnames: Vec<String>,
     pub is_default: bool,
     pub is_enabled: bool,
@@ -88,19 +88,19 @@ pub struct RequestHandler {
 
 impl Configuration {
     pub fn new() -> Self {
-        let default_site = Sites {
+        let default_site = Site {
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
             web_root: "./www-default".to_string(),
             web_root_index_file_list: vec!["index.html".to_string()],
-            enabled_handlers: vec!["php_handler".to_string()], // No specific handlers enabled by default
-            //enabled_handlers: vec![],
+            enabled_handlers: vec!["php_handler".to_string()], // For testing
+            //enabled_handlers: vec![], // No specific handlers enabled by default
             tls_cert_path: None,
             tls_key_path: None,
         };
 
-        let admin_site = Sites {
+        let admin_site = Site {
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
@@ -337,7 +337,7 @@ impl Binding {
     }
 }
 
-impl Sites {
+impl Site {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 

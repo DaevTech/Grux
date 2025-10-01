@@ -1,4 +1,5 @@
 use grux::grux_configuration;
+use grux::grux_core;
 use grux::grux_database;
 use grux::grux_external_request_handlers;
 use grux::grux_http_server;
@@ -6,8 +7,11 @@ use grux::grux_log;
 use log::{error, info};
 
 fn main() {
+    // Load operation mode
+    let operation_mode = grux_core::grux_operation_mode::load_operation_mode();
+
     // Initialize logging
-    match grux_log::init_logging() {
+    match grux_log::init_logging(operation_mode) {
         Ok(_) => {}
         Err(e) => {
             error!("Failed to initialize logging: {}", e);
@@ -18,6 +22,7 @@ fn main() {
     // Starting grux
     let version = env!("CARGO_PKG_VERSION", "unknown");
     info!("Starting grux {}...", version);
+    info!("Operation mode: {:?}", operation_mode);
 
     // Load configuration and check for errors
     let configuration_check_result = grux_configuration::check_configuration();

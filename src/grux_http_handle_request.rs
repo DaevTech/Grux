@@ -8,6 +8,7 @@ use hyper::body::Body;
 use hyper::body::Bytes;
 use hyper::header::HeaderValue;
 use hyper::{Request, Response};
+use log::debug;
 use log::trace;
 
 // Handle the incoming request
@@ -54,7 +55,7 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
     // Now se determine what the request is, and how to handle it
     let headers = req.headers();
     let headers_map = headers.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or(""))).collect::<Vec<_>>();
-    trace!(
+    debug!(
         "Received request: method={}, path={}, query={}, body_size={}, headers={:?}",
         method, path, query, body_size, headers_map
     );
@@ -123,7 +124,7 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
             let file_matches = handler.get_file_matches();
             if file_matches.iter().any(|m| file_path.ends_with(m)) {
                 trace!("Passing request to external handler {} for file {}", handler_id, file_path);
-                handler_response = handler.handle_request(&req, &file_path);
+                handler_response = handler.handle_request(&req, &site, &file_path);
                 handler_did_stuff = true;
                 break; // Only handle with the first matching handler
             }
@@ -161,7 +162,7 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
 }
 
 // Find a best match site for the requested hostname
-fn find_best_match_site<'a>(sites: &'a [Sites], requested_hostname: &'a str) -> Option<&'a Sites> {
+fn find_best_match_site<'a>(sites: &'a [Site], requested_hostname: &'a str) -> Option<&'a Site> {
     let mut site = sites.iter().find(|s| s.hostnames.contains(&requested_hostname.to_string()) && s.is_enabled);
 
     // We check for star hostnames

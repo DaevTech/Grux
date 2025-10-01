@@ -1,11 +1,12 @@
+use crate::grux_configuration_struct::Site;
 use crate::grux_external_request_handlers::ExternalRequestHandler;
 use crate::grux_external_request_handlers::grux_php_cgi_process::PhpCgiProcess;
+use crate::grux_file_util::{get_full_file_path, replace_web_root_in_path, split_path};
 use crate::grux_http_util::*;
-use crate::grux_file_util::split_path;
 use crate::grux_port_manager::PortManager;
 use http_body_util::combinators::BoxBody;
 use hyper::Request;
-use log::{error, trace};
+use log::{error, debug, trace};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +24,7 @@ use tokio::sync::oneshot;
 #[derive(Debug)]
 struct PHPRequest {
     script_file: String,
+    local_web_root: String,
     cgi_web_root: String,
     method: String,
     uri: String,
@@ -51,6 +53,7 @@ pub struct PHPHandler {
     extra_handler_config: Vec<(String, String)>,
     extra_environment: Vec<(String, String)>,
     php_processes: Arc<Mutex<Vec<Arc<Mutex<PhpCgiProcess>>>>>,
+    is_using_external_fastcgi: bool,
 }
 
 impl PHPHandler {
@@ -84,6 +87,16 @@ impl PHPHandler {
             }
         }
 
+        // On Windows, we can use internal php-cgi.exe processes
+        // unless the user has specified an external FastCGI server
+        // we prefer the external fastcgi, as it is more efficient
+        let mut is_using_external_fastcgi = true;
+        if cfg!(target_os = "windows") {
+            if ip_and_port.is_empty() {
+                is_using_external_fastcgi = false;
+            }
+        }
+
         PHPHandler {
             request_queue_tx,
             request_queue_rx,
@@ -96,6 +109,7 @@ impl PHPHandler {
             extra_handler_config,
             extra_environment,
             php_processes: Arc::new(Mutex::new(php_processes)),
+            is_using_external_fastcgi,
         }
     }
 
@@ -113,7 +127,7 @@ impl PHPHandler {
     /// 3. Reads the response containing STDOUT records
     /// 4. Parses the HTTP response and converts it to a Hyper response
     /// 5. Sends the response back through the oneshot channel
-    async fn handle_fastcgi_request(php_request: PHPRequest, ip_and_port: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_fastcgi_request(php_request: PHPRequest, ip_and_port: String, is_using_external_fastcgi: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Connect to the FastCGI server
         let mut stream = tokio::net::TcpStream::connect(&ip_and_port).await?;
 
@@ -122,9 +136,32 @@ impl PHPHandler {
         let script_name = uri_parts[0];
         let query_string = if uri_parts.len() > 1 { uri_parts[1] } else { "" };
 
-        // Pass the script file path, to get the directory and filename
-        let full_script_path = php_request.script_file.clone();
-        let (directory, filename) = split_path(&php_request.script_file);
+        // Pass the script file path, to get the directory and filename, and get the cgi web root
+        let mut full_script_path = php_request.script_file.clone();
+        let mut script_web_root = php_request.local_web_root.clone();
+
+        if is_using_external_fastcgi {
+            // If using an external FastCGI server, we may need to adjust the web root
+            // This is useful for setups like Docker or WSL where the web root inside
+            // the container/WSL differs from the host path
+            if !php_request.cgi_web_root.is_empty() {
+                // we need to full local web root, so we can replace to full path
+                let full_local_web_root_result = get_full_file_path(&php_request.local_web_root);
+
+                if let Err(e) = full_local_web_root_result {
+                    trace!("Error resolving file path for local web root {}: {}", php_request.local_web_root, e);
+                    // Return error
+                    let _ = php_request.response_tx.send(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
+                    return Ok(());
+                }
+                let full_local_web_root = full_local_web_root_result.unwrap();
+
+                full_script_path = replace_web_root_in_path(&full_script_path, &full_local_web_root, &php_request.cgi_web_root);
+                script_web_root = php_request.cgi_web_root.clone();
+            }
+        }
+
+        let (directory, filename) = split_path(&script_web_root, &full_script_path);
 
         trace!("PHP FastCGI - Directory: {}, Filename: {}", directory, filename);
 
@@ -143,34 +180,28 @@ impl PHPHandler {
             return Ok(());
         }
 
-        // Determine which web root to use for CGI (as it might be different than the site web root used by Grux, such as PHP-FPM in a Docker)
-        let mut cgi_web_root = directory.clone();
-        if !php_request.cgi_web_root.is_empty() {
-            cgi_web_root = php_request.cgi_web_root.clone();
-        }
-
         // Build FastCGI parameters (CGI environment variables)
         let mut params: Vec<(String, String)> = Vec::new();
         params.push(("REQUEST_METHOD".to_string(), php_request.method.clone()));
         params.push(("REQUEST_URI".to_string(), php_request.uri.clone()));
         params.push(("SCRIPT_NAME".to_string(), script_name.to_string()));
         params.push(("SCRIPT_FILENAME".to_string(), full_script_path.to_string()));
-        params.push(("DOCUMENT_ROOT".to_string(), cgi_web_root));
+        params.push(("DOCUMENT_ROOT".to_string(), script_web_root));
         params.push(("QUERY_STRING".to_string(), query_string.to_string()));
         params.push(("CONTENT_LENGTH".to_string(), php_request.body.len().to_string()));
         params.push(("SERVER_SOFTWARE".to_string(), "Grux".to_string()));
-//        params.push(("SERVER_NAME".to_string(), "localhost".to_string()));
-//        params.push(("SERVER_PORT".to_string(), "80".to_string()));
-//        params.push(("HTTPS".to_string(), "".to_string()));
+        //        params.push(("SERVER_NAME".to_string(), "localhost".to_string()));
+        //        params.push(("SERVER_PORT".to_string(), "80".to_string()));
+        //        params.push(("HTTPS".to_string(), "".to_string()));
         params.push(("GATEWAY_INTERFACE".to_string(), "CGI/1.1".to_string()));
         params.push(("SERVER_PROTOCOL".to_string(), "HTTP/1.1".to_string()));
- //       params.push(("REMOTE_ADDR".to_string(), "127.0.0.1".to_string()));
-      //  params.push(("REMOTE_HOST".to_string(), "localhost".to_string()));
+        //       params.push(("REMOTE_ADDR".to_string(), "127.0.0.1".to_string()));
+        //  params.push(("REMOTE_HOST".to_string(), "localhost".to_string()));
 
         // Additional important FastCGI variables for PHP
-    //    params.push(("PATH_INFO".to_string(), "".to_string()));
-//        params.push(("PATH_TRANSLATED".to_string(), full_file_path.clone()));
-   //     params.push(("PATH_TRANSLATED".to_string(), "/var/www/html/index.php".to_string()));
+        //    params.push(("PATH_INFO".to_string(), "".to_string()));
+        //        params.push(("PATH_TRANSLATED".to_string(), full_file_path.clone()));
+        //     params.push(("PATH_TRANSLATED".to_string(), "/var/www/html/index.php".to_string()));
         params.push(("REDIRECT_STATUS".to_string(), "200".to_string())); // Important for PHP-CGI security
 
         // Add HTTP headers as CGI variables
@@ -246,8 +277,6 @@ impl PHPHandler {
             let _ = php_request.response_tx.send(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
             return Ok(());
         }
-
-        trace!("FastCGI response received: {}", http_response);
 
         // Parse the HTTP response
         let (headers_part, body_part) = if let Some(pos) = http_response.find("\r\n\r\n") {
@@ -428,19 +457,25 @@ impl ExternalRequestHandler for PHPHandler {
             let ip_and_port = self.ip_and_port.clone(); // Clone needed field
             let enter_guard = self.tokio_runtime.enter();
 
+            let is_using_external_fastcgi = self.is_using_external_fastcgi.clone();
+
             tokio::spawn(async move {
                 trace!("PHP worker thread {} started", worker_id);
 
-                #[cfg(target_os = "windows")]
-                // Get the PHP process for this worker
-                let process = {
-                    let processes_guard = processes_clone.lock().await;
-                    processes_guard[worker_id].clone()
-                };
+                if is_using_external_fastcgi {
+                    // If using an external FastCGI server (like PHP-FPM in Docker/WSL), we don't need to start processes
+                    trace!("PHP worker {} using external FastCGI server at {}", worker_id, ip_and_port);
+                } else {
+                    // Using internal PHP-CGI processes
+                    trace!("PHP worker {} using internal PHP-CGI processes", worker_id);
 
-                #[cfg(target_os = "windows")]
-                // Start the PHP-CGI process
-                {
+                    // Get the PHP process for this worker
+                    let process = {
+                        let processes_guard = processes_clone.lock().await;
+                        processes_guard[worker_id].clone()
+                    };
+
+                    // Start the PHP-CGI process
                     let mut process_guard = process.lock().await;
                     if let Err(e) = process_guard.start().await {
                         error!("Failed to start PHP-CGI for worker {}: {}", worker_id, e);
@@ -448,25 +483,20 @@ impl ExternalRequestHandler for PHPHandler {
                     }
                 }
 
-                #[cfg(target_os = "windows")]
-                // Process health monitoring task
-                let process_monitor = process.clone();
+                // We only want to handle a certain number of requests before restarting the process to avoid memory leaks
+                // This is especially important for long-running PHP-CGI processes on Windows
+                // On Linux with PHP-FPM, this is less of a concern as PHP-FPM manages its own process lifecycle
 
-                #[cfg(target_os = "windows")]
-                tokio::spawn(async move {
-                    loop {
-                        {
-                            let mut process_guard = process_monitor.lock().await;
-                            if let Err(e) = process_guard.ensure_running().await {
-                                error!("Failed to ensure PHP-CGI process is running: {}", e);
-                            }
-                        }
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    }
-                });
+                let max_requests = 10000;
+                let mut handled_requests = 0;
 
                 // Main request processing loop
                 loop {
+                    let process = {
+                        let processes_guard = processes_clone.lock().await;
+                        processes_guard[worker_id].clone()
+                    };
+
                     // Lock the receiver and await one job
                     let mut rx_data = rx.lock().await;
                     match rx_data.recv().await {
@@ -474,9 +504,20 @@ impl ExternalRequestHandler for PHPHandler {
                             drop(rx_data); // release lock early
                             trace!("PHP Worker {} got request: {} {}", worker_id, php_request.method, php_request.uri);
 
-                            #[cfg(target_os = "windows")]
-                            {
-                                 // Get the port from the process
+                            if is_using_external_fastcgi {
+                                // If using external, we connect to the specified IP and port
+                                let ip_and_port = ip_and_port.clone();
+
+                                match PHPHandler::handle_fastcgi_request(php_request, ip_and_port, is_using_external_fastcgi).await {
+                                    Ok(_) => {
+                                        trace!("PHP request processed successfully for worker {}", worker_id);
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to process PHP request for worker {}: {}", worker_id, e);
+                                    }
+                                }
+                            } else {
+                                // Get the port from the process
                                 let port = {
                                     let process_guard = process.lock().await;
                                     process_guard.get_port()
@@ -487,22 +528,8 @@ impl ExternalRequestHandler for PHPHandler {
                                     continue;
                                 }
                                 let ip_and_port = format!("127.0.0.1:{}", port.unwrap());
-                                match PHPHandler::handle_fastcgi_request(php_request, ip_and_port).await {
-                                    Ok(_) => {
-                                        trace!("PHP request processed successfully for worker {}", worker_id);
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to process PHP request for worker {}: {}", worker_id, e);
-                                    }
-                                }
-                            }
 
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                 // On Linux/Unix, interact with php-fpm directly
-                                let ip_and_port = ip_and_port.clone();
-
-                                match PHPHandler::handle_fastcgi_request(php_request, ip_and_port).await {
+                                match PHPHandler::handle_fastcgi_request(php_request, ip_and_port, is_using_external_fastcgi).await {
                                     Ok(_) => {
                                         trace!("PHP request processed successfully for worker {}", worker_id);
                                     }
@@ -517,6 +544,26 @@ impl ExternalRequestHandler for PHPHandler {
                             trace!("PHP worker {} request channel closed, exiting", worker_id);
                             break;
                         }
+                    }
+
+                    // Increase the handled request count and end this thread if max reached
+                    handled_requests += 1;
+                    if handled_requests >= max_requests {
+                        debug!("PHP Worker {} reached max requests ({}), ending process", worker_id, max_requests);
+                        // Stop and restart the cgi process
+                        if !is_using_external_fastcgi {
+                            let process = {
+                                let processes_guard = processes_clone.lock().await;
+                                processes_guard[worker_id].clone()
+                            };
+                            let mut process_guard = process.lock().await;
+                            process_guard.stop().await;
+
+                            if let Err(e) = process_guard.start().await {
+                                error!("Failed to restart PHP-CGI for worker {}: {}", worker_id, e);
+                            }
+                        }
+                        handled_requests = 0; // reset count
                     }
                 }
             });
@@ -553,7 +600,7 @@ impl ExternalRequestHandler for PHPHandler {
     /// 3. Spawn an async task in the existing runtime to wait for the response
     /// 4. Use std::sync channels to get the result back to the sync context
     /// 5. Return the HTTP response synchronously
-    fn handle_request(&self, request: &Request<hyper::body::Incoming>, full_file_path: &String) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
+    fn handle_request(&self, request: &Request<hyper::body::Incoming>, site: &Site, full_file_path: &String) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
         trace!("PHP request received: {} {}", request.method(), request.uri());
 
         // Extract request data
@@ -579,6 +626,7 @@ impl ExternalRequestHandler for PHPHandler {
         // Create the PHP request
         let php_request = PHPRequest {
             script_file: full_file_path.clone(),
+            local_web_root: site.web_root.clone(),
             cgi_web_root: self.other_webroot.clone(),
             method,
             uri,

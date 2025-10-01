@@ -1,6 +1,6 @@
 use crate::{
     grux_configuration::get_configuration,
-    grux_configuration_struct::{RequestHandler, Server},
+    grux_configuration_struct::{RequestHandler, Server, Site},
     grux_external_request_handlers::grux_handler_php::PHPHandler,
 };
 use hyper::Request;
@@ -21,7 +21,7 @@ pub trait ExternalRequestHandler: Send + Sync {
     fn start(&self);
     fn stop(&self);
     fn get_file_matches(&self) -> Vec<String>;
-    fn handle_request(&self, request: &Request<hyper::body::Incoming>, full_file_path: &String) -> Response<BoxBody<Bytes, hyper::Error>>;
+    fn handle_request(&self, request: &Request<hyper::body::Incoming>, site: &Site, full_file_path: &String) -> Response<BoxBody<Bytes, hyper::Error>>;
     fn get_handler_type(&self) -> String;
 }
 

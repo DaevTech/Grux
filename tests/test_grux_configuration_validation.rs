@@ -12,6 +12,7 @@ fn test_request_handler_validation_valid() {
         file_match: vec![".php".to_string(), ".php".to_string()],
         executable: "php-cgi.exe".to_string(),
         ip_and_port: "127.0.0.1:9000".to_string(),
+        other_webroot: "./www-default".to_string(),
         extra_handler_config: vec![("option1".to_string(), "value1".to_string())],
         extra_environment: vec![("ENV_VAR".to_string(), "value".to_string())],
     };
@@ -231,7 +232,7 @@ fn test_request_handler_validation_invalid_env_var_name() {
 
 #[test]
 fn test_configuration_full_validation() {
-    let default_site = Sites {
+    let default_site = Site {
         hostnames: vec!["*".to_string()],
         is_default: true,
         is_enabled: true,
@@ -300,6 +301,7 @@ fn create_valid_handler() -> RequestHandler {
         file_match: vec![".php".to_string()],
         executable: "php-cgi.exe".to_string(),
         ip_and_port: "127.0.0.1:9000".to_string(),
+        other_webroot: "./www-default".to_string(),
         extra_handler_config: vec![],
         extra_environment: vec![],
     }
