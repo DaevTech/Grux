@@ -96,7 +96,7 @@ fn start_external_request_handlers() -> Result<ExternalRequestHandlers, String> 
                     handler.executable.clone(),
                     handler.ip_and_port.clone(),
                     handler.request_timeout,
-                    handler.max_concurrent_requests,
+                    handler.max_concurrent_threads,
                     handler.other_webroot.clone(),
                     handler.extra_handler_config,
                     handler.extra_environment,

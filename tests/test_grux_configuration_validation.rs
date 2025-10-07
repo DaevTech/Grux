@@ -8,7 +8,7 @@ fn test_request_handler_validation_valid() {
         name: "PHP Handler".to_string(),
         handler_type: "php".to_string(),
         request_timeout: 30,
-        max_concurrent_requests: 10,
+        max_concurrent_threads: 10,
         file_match: vec![".php".to_string(), ".php".to_string()],
         executable: "php-cgi.exe".to_string(),
         ip_and_port: "127.0.0.1:9000".to_string(),
@@ -101,7 +101,7 @@ fn test_request_handler_validation_excessive_timeout() {
 #[test]
 fn test_request_handler_validation_zero_concurrent_requests() {
     let mut handler = create_valid_handler();
-    handler.max_concurrent_requests = 0;
+    handler.max_concurrent_threads = 0;
 
     let result = handler.validate();
     assert!(result.is_err());
@@ -112,7 +112,7 @@ fn test_request_handler_validation_zero_concurrent_requests() {
 #[test]
 fn test_request_handler_validation_excessive_concurrent_requests() {
     let mut handler = create_valid_handler();
-    handler.max_concurrent_requests = 2000;
+    handler.max_concurrent_threads = 2000;
 
     let result = handler.validate();
     assert!(result.is_err());
@@ -297,7 +297,7 @@ fn create_valid_handler() -> RequestHandler {
         name: "PHP Handler".to_string(),
         handler_type: "php".to_string(),
         request_timeout: 30,
-        max_concurrent_requests: 10,
+        max_concurrent_threads: 10,
         file_match: vec![".php".to_string()],
         executable: "php-cgi.exe".to_string(),
         ip_and_port: "127.0.0.1:9000".to_string(),

@@ -835,7 +835,6 @@ impl ExternalRequestHandler for PHPHandler {
         // Wait for the result synchronously
         match sync_rx.recv_timeout(timeout_duration + Duration::from_secs(1)) {
             Ok(Ok(Ok(response))) => {
-                trace!("PHP request processed successfully");
                 response
             }
             Ok(Ok(Err(_))) => {
