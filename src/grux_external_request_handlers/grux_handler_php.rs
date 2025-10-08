@@ -308,7 +308,7 @@ impl PHPHandler {
         let port_manager = PortManager::instance();
 
         // Initialize single PHP-CGI process (only used on Windows)
-        let php_process = Arc::new(Mutex::new(PhpCgiProcess::new(executable.clone(), port_manager.clone(), extra_environment.clone())));
+        let php_process = Arc::new(Mutex::new(PhpCgiProcess::new(executable, port_manager.clone(), extra_environment)));
 
         // On Windows, we can use internal php-cgi.exe processes
         // unless the user has specified an external FastCGI server
@@ -354,8 +354,8 @@ impl PHPHandler {
         false
     }
 
-    fn parse_fastcgi_response(buffer: &[u8]) -> String {
-        let mut response = String::new();
+    pub fn parse_fastcgi_response(buffer: &[u8]) -> Vec<u8> {
+        let mut response = Vec::new();
         let mut i = 0;
 
         while i + 8 <= buffer.len() {
@@ -378,7 +378,7 @@ impl PHPHandler {
             if record_type == 6 {
                 // FCGI_STDOUT
                 let content = &buffer[content_start..content_end];
-                response.push_str(&String::from_utf8_lossy(content));
+                response.extend_from_slice(content);
             } else if record_type == 3 {
                 // FCGI_END_REQUEST
                 break;
@@ -787,23 +787,27 @@ impl PHPHandler {
         }
 
         // Parse FastCGI response and extract HTTP response
-        let http_response = Self::parse_fastcgi_response(&response_buffer);
+        let http_response_bytes = Self::parse_fastcgi_response(&response_buffer);
 
-        if http_response.trim().is_empty() {
+        if http_response_bytes.is_empty() {
             error!("Empty response from PHP-CGI process");
             return empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR);
         }
 
-        // Parse the HTTP response
-        let (headers_part, body_part) = if let Some(pos) = http_response.find("\r\n\r\n") {
-            let (h, b) = http_response.split_at(pos + 4);
-            (h.to_string(), b.to_string())
-        } else if let Some(pos) = http_response.find("\n\n") {
-            let (h, b) = http_response.split_at(pos + 2);
-            (h.to_string(), b.to_string())
+        // Find the end of headers to separate headers from body
+        let (headers_bytes, body_bytes) = if let Some(pos) = http_response_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+            let split_pos = pos + 4;
+            (&http_response_bytes[..pos], &http_response_bytes[split_pos..])
+        } else if let Some(pos) = http_response_bytes.windows(2).position(|w| w == b"\n\n") {
+            let split_pos = pos + 2;
+            (&http_response_bytes[..pos], &http_response_bytes[split_pos..])
         } else {
-            ("".to_string(), http_response)
+            // No headers separator found, treat entire response as body
+            (&[][..], &http_response_bytes[..])
         };
+
+        // Convert headers to string for parsing (headers should always be valid UTF-8)
+        let headers_part = String::from_utf8_lossy(headers_bytes).to_string();
 
         // Build HTTP response
         let mut response_builder = hyper::Response::builder();
@@ -838,8 +842,8 @@ impl PHPHandler {
             }
         }
 
-        // Build the final response
-        match response_builder.status(status_code).body(full(body_part)) {
+        // Build the final response with binary body
+        match response_builder.status(status_code).body(full(body_bytes.to_vec())) {
             Ok(response) => {
                 trace!("FastCGI response parsed successfully");
                 response

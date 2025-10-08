@@ -36,7 +36,7 @@ fn main() {
     }
 
     // Starting Grux
-    let version = env!("CARGO_PKG_VERSION", "unknown");
+    let version = env!("CARGO_PKG_VERSION");
     info!("Starting Grux {}...", version);
     info!("Operation mode: {:?}", operation_mode);
 
