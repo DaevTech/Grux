@@ -8,7 +8,7 @@ use log4rs::{
     encode::pattern::PatternEncoder,
     filter::threshold::ThresholdFilter,
 };
-
+use std::fs::OpenOptions;
 use crate::grux_core::grux_operation_mode::OperationMode;
 
 // Initilize the logging
@@ -19,20 +19,20 @@ pub fn init_logging(operation_mode: OperationMode) -> Result<log4rs::Handle, Str
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder()
         .target(Target::Stderr)
-        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S)(utc)} - {l}: {m}{n})}")))
+        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S%.3f)(utc)} - {l}: {m}{n})}")))
         .build();
 
     // Logging to log file.
     let logfile = FileAppender::builder()
         // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/indeonex.html
-        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S)(utc)} - {l}: {m}{n})}")))
+        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S%.3f)(utc)} - {l}: {m}{n})}")))
         .build(&file_path)
         .unwrap();
 
     // Log Trace level output to file where trace is the default level
     // and the programmatically specified level to stderr.
     let trace_logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S)(utc)} - {l}: {m}{n})}")))
+        .encoder(Box::new(PatternEncoder::new("{h({d(%d-%m-%Y %H:%M:%S%.3f)(utc)} - {l}: {m}{n})}")))
         .build(format!("{}/trace.log", get_log_location().map_err(|e| format!("Failed to get log location: {}", e))?))
         .unwrap();
 
@@ -41,7 +41,6 @@ pub fn init_logging(operation_mode: OperationMode) -> Result<log4rs::Handle, Str
     match operation_mode {
         OperationMode::DEV => {
             // We truncate the log files on each start in dev mode
-            use std::fs::OpenOptions;
             let _ = OpenOptions::new().write(true).truncate(true).create(true).open(format!("{}/system.log", &log_path)).unwrap();
             let _ = OpenOptions::new().write(true).truncate(true).create(true).open(format!("{}/trace.log", &log_path)).unwrap();
 

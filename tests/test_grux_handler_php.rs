@@ -76,15 +76,15 @@ fn test_php_handler_concurrent_processing() {
 fn test_fastcgi_binary_response_parsing() {
     // Test that the parse_fastcgi_response function correctly handles binary data
     // This simulates a FastCGI response with binary content in the body
-    
+
     // Create a mock FastCGI STDOUT record with binary data
     let mut fastcgi_response = Vec::new();
-    
+
     // FastCGI header: version=1, type=6 (STDOUT), request_id=1, content_length, padding=0, reserved=0
     let binary_content = vec![0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD]; // Some binary data
     let headers = b"Content-Type: application/octet-stream\r\n\r\n";
     let full_content = [headers.as_slice(), &binary_content].concat();
-    
+
     fastcgi_response.push(1); // version
     fastcgi_response.push(6); // type: FCGI_STDOUT
     fastcgi_response.extend(&1u16.to_be_bytes()); // request_id
@@ -92,7 +92,7 @@ fn test_fastcgi_binary_response_parsing() {
     fastcgi_response.push(0); // padding_length
     fastcgi_response.push(0); // reserved
     fastcgi_response.extend(&full_content);
-    
+
     // Add FCGI_END_REQUEST record
     fastcgi_response.push(1); // version
     fastcgi_response.push(3); // type: FCGI_END_REQUEST
@@ -101,11 +101,11 @@ fn test_fastcgi_binary_response_parsing() {
     fastcgi_response.push(0); // padding_length
     fastcgi_response.push(0); // reserved
     fastcgi_response.extend(&[0u8; 8]); // end request body
-    
+
     // Parse the response using our updated function
     use grux::grux_external_request_handlers::grux_handler_php::PHPHandler;
     let parsed_response = PHPHandler::parse_fastcgi_response(&fastcgi_response);
-    
+
     // Verify the binary data is preserved
     assert!(parsed_response.len() > 0);
     assert!(parsed_response.windows(binary_content.len()).any(|w| w == binary_content.as_slice()));

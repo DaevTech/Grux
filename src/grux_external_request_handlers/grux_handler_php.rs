@@ -10,7 +10,7 @@ use std::sync::{Arc, atomic::{AtomicU16, Ordering}};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 
 /// Structure to manage a single persistent PHP-CGI process with FastCGI children.
@@ -26,18 +26,20 @@ struct PhpCgiProcess {
     restart_count: u32,
     assigned_port: Option<u16>,
     port_manager: PortManager,
+    concurrent_threads: usize,
     last_activity: Instant,
     extra_environment: Vec<(String, String)>,
 }
 
 impl PhpCgiProcess {
-    fn new(executable_path: String, port_manager: PortManager, extra_environment: Vec<(String, String)>) -> Self {
+    fn new(executable_path: String, port_manager: PortManager, concurrent_threads: usize, extra_environment: Vec<(String, String)>) -> Self {
         PhpCgiProcess {
             process: None,
             executable_path,
             restart_count: 0,
             assigned_port: None,
             port_manager,
+            concurrent_threads,
             last_activity: Instant::now(),
             extra_environment,
         }
@@ -61,17 +63,8 @@ impl PhpCgiProcess {
             // For Windows, use php-cgi.exe in FastCGI mode with children
             cmd.arg("-b").arg(format!("127.0.0.1:{}", port));
 
-            // Fetch the CPU count to set children accordingly
-            let mut cpus = num_cpus::get_physical();
-            if cpus > 10 {
-                cpus = 10;
-            }
-            if cpus < 1 {
-                cpus = 1;
-            }
-
             // Set environment variable for FastCGI children
-            cmd.env("PHP_FCGI_CHILDREN", cpus.to_string());
+            cmd.env("PHP_FCGI_CHILDREN", self.concurrent_threads.to_string());
             cmd.env("PHP_FCGI_MAX_REQUESTS", "10000");
 
             // Set any extra environment variables
@@ -282,14 +275,15 @@ impl PhpCgiProcess {
 /// - Automatically restarts the process if it doesn't respond to keep-alive
 /// - Provides worker threads that handle requests through the single CGI process
 /// - Uses the singleton port manager to assign a single port starting from 9000
+/// - Limits concurrent connections to php-fmp based on concurrent_threads to prevent timeouts
 pub struct PHPHandler {
     request_timeout: usize,
-    concurrent_threads: usize,
     ip_and_port: String,
     other_webroot: String,
     php_process: Arc<Mutex<PhpCgiProcess>>,
     cached_port: Arc<AtomicU16>,
     is_using_external_fastcgi: bool,
+    connection_semaphore: Arc<Semaphore>,
 }
 
 impl PHPHandler {
@@ -308,7 +302,7 @@ impl PHPHandler {
         let port_manager = PortManager::instance();
 
         // Initialize single PHP-CGI process (only used on Windows)
-        let php_process = Arc::new(Mutex::new(PhpCgiProcess::new(executable, port_manager.clone(), extra_environment)));
+        let php_process = Arc::new(Mutex::new(PhpCgiProcess::new(executable, port_manager.clone(), concurrent_threads.clone(), extra_environment)));
 
         // On Windows, we can use internal php-cgi.exe processes
         // unless the user has specified an external FastCGI server
@@ -320,24 +314,16 @@ impl PHPHandler {
             }
         }
 
-        // Determine the concurrent threads we want to spawn to handle requests
-        let concurrent_threads = if concurrent_threads == 0 {
-            let cpus = num_cpus::get_physical();
-            cpus
-        } else if concurrent_threads < 1 {
-            1
-        } else {
-            concurrent_threads
-        };
+        trace!("PHP handler initialized with {} concurrent connection limit", concurrent_threads);
 
         PHPHandler {
             request_timeout,
-            concurrent_threads,
             ip_and_port,
             other_webroot,
             php_process,
             cached_port: Arc::new(AtomicU16::new(0)),
             is_using_external_fastcgi,
+            connection_semaphore: Arc::new(Semaphore::new(concurrent_threads)),
         }
     }
 
@@ -442,11 +428,6 @@ impl ExternalRequestHandler for PHPHandler {
                 trace!("No Tokio runtime available for keep-alive monitoring, monitoring will be handled per-request");
             }
         }
-
-        // Simple approach - no worker pool needed!
-        // We'll spawn a new task for each request
-
-
     }
 
     fn stop(&self) {
@@ -642,6 +623,21 @@ impl PHPHandler {
         http_version: String,
         ip_and_port: String
     ) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
+        let available_permits = self.connection_semaphore.available_permits();
+        trace!("Acquiring connection permit for FastCGI server at {} (available permits: {})", ip_and_port, available_permits);
+
+        // Acquire a connection permit to limit concurrent connections to php-fmp
+        let _permit = match self.connection_semaphore.acquire().await {
+            Ok(permit) => {
+                trace!("Connection permit acquired for FastCGI server (remaining permits: {})", self.connection_semaphore.available_permits());
+                permit
+            }
+            Err(e) => {
+                error!("Failed to acquire connection permit for FastCGI server: {}", e);
+                return empty_response_with_status(hyper::StatusCode::SERVICE_UNAVAILABLE);
+            }
+        };
+
         trace!("Connecting to FastCGI server at {}", ip_and_port);
 
         // Connect to the FastCGI server
@@ -719,7 +715,8 @@ impl PHPHandler {
         }
 
         // Send FastCGI request
-        trace!("📤 Sending FastCGI request...");
+        trace!("Sending FastCGI request...");
+        let start_time = Instant::now();
 
         // Send BEGIN_REQUEST
         let begin_request = PhpCgiProcess::create_fastcgi_begin_request();
@@ -845,7 +842,13 @@ impl PHPHandler {
         // Build the final response with binary body
         match response_builder.status(status_code).body(full(body_bytes.to_vec())) {
             Ok(response) => {
-                trace!("FastCGI response parsed successfully");
+                let end_time = Instant::now();
+                let duration = end_time - start_time;
+                trace!("FastCGI response parsed successfully in {:?}", duration);
+
+                // _permit will be automatically dropped here, releasing the semaphore permit
+                trace!("Connection permit will be released (available permits after release: {})",
+                       self.connection_semaphore.available_permits() + 1);
                 response
             }
             Err(e) => {

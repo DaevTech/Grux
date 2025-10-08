@@ -15,9 +15,7 @@ pub struct ExternalRequestHandlers {
 }
 
 // Supported rewrite functions
-pub static REWRITE_FUNCTIONS: &[&str] = &[
-    "OnlyWebRootIndexForSubdirs",
-];
+pub static REWRITE_FUNCTIONS: &[&str] = &["OnlyWebRootIndexForSubdirs"];
 
 // A trait for external request handlers
 pub trait ExternalRequestHandler: Send + Sync {
@@ -90,13 +88,24 @@ fn start_external_request_handlers() -> Result<ExternalRequestHandlers, String> 
 
     // Start the handlers with the type we want
     for (handler_type, handler) in handler_type_to_load {
+        // Determine the concurrent threads. Can be set in config or we determine it based on CPU cores
+        // 0 = automatically based on CPU cores
+        let concurrent_threads = if handler.concurrent_threads == 0 {
+            let cpus = num_cpus::get_physical();
+            cpus
+        } else if handler.concurrent_threads < 1 {
+            1
+        } else {
+            handler.concurrent_threads
+        };
+
         match handler_type.as_str() {
             "php" => {
                 let php_handler = PHPHandler::new(
                     handler.executable.clone(),
                     handler.ip_and_port.clone(),
                     handler.request_timeout,
-                    handler.max_concurrent_threads,
+                    concurrent_threads,
                     handler.other_webroot.clone(),
                     handler.extra_handler_config,
                     handler.extra_environment,

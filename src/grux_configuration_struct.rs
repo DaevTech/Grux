@@ -78,7 +78,7 @@ pub struct RequestHandler {
     pub name: String,                                // A name to identify the handler, self chosen
     pub handler_type: String,                        // e.g., "php", "python", etc. Used by the handlers to identify if they should handle requests
     pub request_timeout: usize,                      // Seconds
-    pub max_concurrent_threads: usize,              // 0 = automatically based on CPU cores
+    pub concurrent_threads: usize,                   // 0 = automatically based on CPU cores on this machine - If PHP-FPM or similar is used, this should match the max children configured there
     pub file_match: Vec<String>,                     // .php, .html, etc
     pub executable: String,                          // Path to the executable or script that handles the request, like php-cgi.exe location for PHP on windows
     pub ip_and_port: String,                         // IP and port to connect to the handler, e.g. 127.0.0.1:9000 for FastCGI passthrough
@@ -185,14 +185,14 @@ impl Configuration {
             is_enabled: true,
             name: "PHP Handler".to_string(),
             handler_type: "php".to_string(),
-            request_timeout: 30,        // seconds
-            max_concurrent_threads: 0, // 0 = automatically based on CPU cores
+            request_timeout: 30,   // seconds
+            concurrent_threads: 0, // 0 = automatically based on CPU cores on this machine - If PHP
             file_match: vec![".php".to_string()],
             executable: "D:/dev/php/8.2.9/php-cgi.exe".to_string(), // Path to the PHP CGI executable (windows only)
-            //ip_and_port: "127.0.0.1:9000".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
-            ip_and_port: "".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
-            //other_webroot: "/var/www/html".to_string(),
-            other_webroot: "".to_string(),
+            ip_and_port: "127.0.0.1:9000".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
+            //ip_and_port: "".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
+            other_webroot: "/var/www/html".to_string(),
+            //other_webroot: "".to_string(),
             extra_handler_config: vec![],
             extra_environment: vec![],
         }];
@@ -550,7 +550,7 @@ impl RequestHandler {
         }
 
         // Validate max concurrent threads
-        if self.max_concurrent_threads > 1000 {
+        if self.concurrent_threads > 1000 {
             errors.push("Max concurrent threads cannot exceed 1000".to_string());
         }
 

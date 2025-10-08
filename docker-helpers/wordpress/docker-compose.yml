@@ -1,0 +1,25 @@
+services:
+
+  wordpress:
+    image: wordpress:fpm-alpine
+    restart: always
+    ports:
+      - 9000:9000
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: exampleuser
+      WORDPRESS_DB_PASSWORD: examplepass
+      WORDPRESS_DB_NAME: exampledb
+    volumes:
+      - D:/dev/test-sites/grux-wp-site1:/var/www/html
+
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: exampledb
+      MYSQL_USER: exampleuser
+      MYSQL_PASSWORD: examplepass
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ./data/db:/var/lib/mysql
