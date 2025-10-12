@@ -17,19 +17,17 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
     let config = get_configuration();
 
     // Figure out what we want to start
-    let servers: Vec<Server> = config.get("servers").unwrap();
+    let servers: &Vec<Server> = &config.servers;
     if servers.is_empty() {
         error!("No servers configured. Please check your configuration.");
         return Err("No servers configured".into());
     }
 
-    let admin_site_config: AdminSite = config.get("admin_site").unwrap();
-
     let mut started_servers = Vec::new();
 
     // Starting the defined client servers
     for server in servers {
-        for binding in server.bindings {
+        for binding in &server.bindings {
             let ip = binding.ip.parse::<std::net::IpAddr>().map_err(|e| format!("Invalid IP address: {}", e))?;
             let port = binding.port;
             let addr = SocketAddr::new(ip, port);
@@ -39,16 +37,7 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
                 warn!("Admin binding requested without TLS on {}:{}. This is not recommended.", binding.ip, binding.port);
             }
 
-            if binding.is_admin {
-                if admin_site_config.is_admin_portal_enabled {
-                    info!("Starting Grux admin server on {}", addr);
-                } else {
-                    warn!("Grux admin portal is disabled in the configuration.");
-                }
-            } else {
-                // Non-admin server
-                info!("Starting Grux server on {}", addr);
-            }
+            info!("Starting Grux server on {}", addr);
 
             // Start listening on the specified address
             let server = start_server_binding(binding);
@@ -62,7 +51,7 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
     Ok(())
 }
 
-fn start_server_binding(binding: Binding) -> impl std::future::Future<Output = ()> {
+fn start_server_binding(binding: &Binding) -> impl std::future::Future<Output = ()> {
     let ip = binding.ip.parse::<std::net::IpAddr>().unwrap();
     let port = binding.port;
     let addr = SocketAddr::new(ip, port);

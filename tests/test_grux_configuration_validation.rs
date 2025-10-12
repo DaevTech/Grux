@@ -38,9 +38,7 @@ fn test_request_handler_validation_short_id() {
     handler.id = "ab".to_string();
 
     let result = handler.validate();
-    assert!(result.is_err());
-    let errors = result.unwrap_err();
-    assert!(errors.iter().any(|e| e.contains("must be at least 3 characters long")));
+    assert!(result.is_ok());
 }
 
 #[test]
@@ -222,18 +220,22 @@ fn test_request_handler_validation_invalid_env_var_name() {
 #[test]
 fn test_configuration_full_validation() {
     let default_site = Site {
+        id: 1,
         hostnames: vec!["*".to_string()],
         is_default: true,
         is_enabled: true,
         web_root: "./www-default".to_string(),
         web_root_index_file_list: vec!["index.html".to_string()],
         enabled_handlers: vec!["php_handler".to_string()],
-        tls_cert_path: None,
-        tls_key_path: None,
+        tls_cert_path: "".to_string(),
+        tls_cert_content: "".to_string(),
+        tls_key_path: "".to_string(),
+        tls_key_content: "".to_string(),
         rewrite_functions: vec![],
     };
 
     let binding = Binding {
+        id: 1,
         ip: "127.0.0.1".to_string(),
         port: 8080,
         is_admin: false,
@@ -260,18 +262,18 @@ fn test_configuration_full_validation() {
         compressible_content_types: vec!["text/html".to_string()],
     };
 
+    let server_settings = ServerSettings {
+        max_body_size: 10 * 1024 * 1024,
+    };
+
     let core = Core {
         file_cache,
         gzip,
-    };
-
-    let admin_site = AdminSite {
-        is_admin_portal_enabled: true,
+        server_settings,
     };
 
     let config = Configuration {
         servers: vec![server],
-        admin_site,
         core,
         request_handlers: vec![create_valid_handler()],
     };
@@ -282,7 +284,7 @@ fn test_configuration_full_validation() {
 
 fn create_valid_handler() -> RequestHandler {
     RequestHandler {
-        id: "php_handler".to_string(),
+        id: "1".to_string(),
         is_enabled: true,
         name: "PHP Handler".to_string(),
         handler_type: "php".to_string(),

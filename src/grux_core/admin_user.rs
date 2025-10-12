@@ -1,8 +1,9 @@
-use sqlite::Connection;
 use log::{info};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc, Duration};
+use serde::{Serialize, Deserialize};
+use sqlite::Connection;
+use uuid::Uuid;
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -28,55 +29,6 @@ pub struct Session {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
-}
-
-pub fn initialize_database() -> Result<(), String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
-
-    // Create users table
-    connection
-        .execute(
-            "CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                last_login TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT 1
-            )"
-        )
-        .map_err(|e| format!("Failed to create users table: {}", e))?;
-
-    // Create sessions table
-    connection
-        .execute(
-            "CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                token TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-            )"
-        )
-        .map_err(|e| format!("Failed to create sessions table: {}", e))?;
-
-    // Create index on session token for faster lookups
-    connection
-        .execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token)")
-        .map_err(|e| format!("Failed to create session token index: {}", e))?;
-
-    // Create index on session expiration for cleanup
-    connection
-        .execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)")
-        .map_err(|e| format!("Failed to create session expiration index: {}", e))?;
-
-    // Check if default admin user exists, if not create it
-    create_default_admin_user(&connection)?;
-
-    info!("Database tables created successfully");
-    Ok(())
 }
 
 fn create_default_admin_user(connection: &Connection) -> Result<(), String> {

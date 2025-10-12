@@ -1,4 +1,3 @@
-use crate::grux_configuration_struct::FileCache as GruxFileCacheConfig;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use log::{debug, trace, warn};
@@ -41,7 +40,7 @@ impl FileCache {
     pub fn new() -> Self {
         // Get configuration
         let config = crate::grux_configuration::get_configuration();
-        let file_data_config: GruxFileCacheConfig = config.get("core.file_cache").unwrap();
+        let file_data_config = &config.core.file_cache;
 
         let is_enabled = file_data_config.is_enabled;
         let max_file_size = file_data_config.cache_max_size_per_file as u64;
@@ -50,8 +49,8 @@ impl FileCache {
         let cleanup_thread_interval = file_data_config.cleanup_thread_interval;
         let forced_eviction_threshold = file_data_config.forced_eviction_threshold;
 
-        let compressible_content_types = config.get::<Vec<String>>("core.gzip.compressible_content_types").unwrap_or(vec![]);
-        let gzip_enabled = config.get_bool("core.gzip.is_enabled").unwrap_or(false);
+        let compressible_content_types = &config.core.gzip.compressible_content_types;
+        let gzip_enabled = &config.core.gzip.is_enabled;
 
         let mut hashmap = HashMap::with_capacity(0);
         if is_enabled {
@@ -77,9 +76,9 @@ impl FileCache {
             is_enabled,
             cache,
             max_file_size,
-            compressible_content_types,
+            compressible_content_types: compressible_content_types.to_vec(),
             cached_items_last_checked,
-            gzip_enabled,
+            gzip_enabled: *gzip_enabled,
         }
     }
 

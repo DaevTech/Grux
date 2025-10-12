@@ -49,12 +49,12 @@ fn start_external_request_handlers() -> Result<ExternalRequestHandlers, String> 
     let config = get_configuration();
 
     // Run through all the configured sites in configuration and determine which is actually referenced
-    let servers: Vec<Server> = config.get("servers").unwrap();
+    let servers: &Vec<Server> = &config.servers;
     let mut handler_ids_used = HashMap::new();
 
     for server in servers {
-        for binding in server.bindings {
-            for site in binding.sites {
+        for binding in &server.bindings {
+            for site in &binding.sites {
                 for handler in &site.enabled_handlers {
                     if !handler_ids_used.contains_key(handler) {
                         handler_ids_used.insert(handler.clone(), true);
@@ -72,13 +72,13 @@ fn start_external_request_handlers() -> Result<ExternalRequestHandlers, String> 
     // Go through our configured handlers and load the ones we need
     let mut handler_type_to_load: HashMap<String, RequestHandler> = HashMap::new();
 
-    let external_handlers: Vec<RequestHandler> = config.get("request_handlers").unwrap();
+    let external_handlers: &Vec<RequestHandler> = &config.request_handlers;
     for handler in external_handlers {
         if handler.is_enabled {
             // Check if the handler is in our enabled list
             if handler_ids_used.contains_key(&handler.id) {
                 if !handler_type_to_load.contains_key(&handler.handler_type) {
-                    handler_type_to_load.insert(handler.handler_type.clone(), handler);
+                    handler_type_to_load.insert(handler.handler_type.clone(), handler.clone());
                 }
             }
         }

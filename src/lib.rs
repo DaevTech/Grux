@@ -4,7 +4,6 @@ pub mod grux_http_server;
 pub mod grux_log;
 pub mod grux_http_admin;
 pub mod grux_http_util;
-pub mod grux_database;
 pub mod grux_file_cache;
 pub mod grux_http_handle_request;
 pub mod grux_http_tls;

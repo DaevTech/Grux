@@ -1,13 +1,12 @@
-use http_body_util::combinators::BoxBody;
-use http_body_util::BodyExt;
-use hyper::{Request, Response};
-use hyper::body::Bytes;
 use crate::grux_configuration_struct::Site;
-use crate::grux_http_util::{full};
-use crate::grux_database::{LoginRequest, authenticate_user, create_session, verify_session_token, invalidate_session};
-use log::{info, error, debug};
+use crate::grux_core::admin_user::{LoginRequest, authenticate_user, create_session, invalidate_session, verify_session_token};
+use crate::grux_http_util::full;
+use http_body_util::BodyExt;
+use http_body_util::combinators::BoxBody;
+use hyper::body::Bytes;
+use hyper::{Request, Response};
+use log::{debug, error, info};
 use serde_json;
-
 
 pub async fn handle_login_request(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check if this is a POST request
@@ -155,36 +154,22 @@ pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incomin
     }
 
     // Get the current configuration
-    let config = crate::grux_configuration::get_newest_configuration();
-
-    // Try to deserialize the configuration to ensure it's valid
-    match config.clone().try_deserialize::<crate::grux_configuration_struct::Configuration>() {
-        Ok(configuration) => {
-            // Serialize the configuration to JSON
-            match serde_json::to_string_pretty(&configuration) {
-                Ok(json_string) => {
-                    let mut resp = Response::new(full(json_string));
-                    *resp.status_mut() = hyper::StatusCode::OK;
-                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
-                    Ok(resp)
-                }
-                Err(e) => {
-                    error!("Failed to serialize configuration to JSON: {}", e);
-                    let mut resp = Response::new(full(r#"{"error": "Failed to serialize configuration"}"#));
-                    *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
-                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
-                    Ok(resp)
-                }
-            }
-        }
+    let config = crate::grux_configuration::get_configuration();
+    let json_config = match serde_json::to_string_pretty(&config) {
+        Ok(json) => json,
         Err(e) => {
-            error!("Failed to deserialize configuration: {}", e);
-            let mut resp = Response::new(full(r#"{"error": "Invalid configuration format"}"#));
+            error!("Failed to serialize configuration: {}", e);
+            let mut resp = Response::new(full(r#"{"error": "Failed to serialize configuration"}"#));
             *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
             resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
-            Ok(resp)
+            return Ok(resp);
         }
-    }
+    };
+
+    let mut resp = Response::new(full(json_config));
+    *resp.status_mut() = hyper::StatusCode::OK;
+    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+    Ok(resp)
 }
 
 pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
@@ -225,7 +210,7 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
     };
 
     // Parse JSON body into Configuration struct
-    let configuration: crate::grux_configuration_struct::Configuration = match serde_json::from_slice(&body_bytes) {
+    let mut configuration: crate::grux_configuration_struct::Configuration = match serde_json::from_slice(&body_bytes) {
         Ok(config) => config,
         Err(e) => {
             error!("Failed to parse configuration JSON: {}", e);
@@ -241,7 +226,7 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
     };
 
     // Save the configuration
-    match crate::grux_configuration::save_configuration(&configuration) {
+    match crate::grux_configuration::save_configuration(&mut configuration) {
         Ok(true) => {
             info!("Configuration updated successfully");
             let success_response = serde_json::json!({
@@ -293,12 +278,12 @@ async fn get_session_token_from_request(req: &Request<hyper::body::Incoming>) ->
 }
 
 // Helper function to verify session token and return session info
-pub fn verify_session(token: &str) -> Result<Option<crate::grux_database::Session>, String> {
+pub fn verify_session(token: &str) -> Result<Option<crate::grux_core::admin_user::Session>, String> {
     verify_session_token(token)
 }
 
 // Middleware-like function to check if request is authenticated
-pub async fn require_authentication(req: &Request<hyper::body::Incoming>) -> Result<Option<crate::grux_database::Session>, Response<BoxBody<Bytes, hyper::Error>>> {
+pub async fn require_authentication(req: &Request<hyper::body::Incoming>) -> Result<Option<crate::grux_core::admin_user::Session>, Response<BoxBody<Bytes, hyper::Error>>> {
     let token = get_session_token_from_request(req).await;
 
     if let Some(token) = token {

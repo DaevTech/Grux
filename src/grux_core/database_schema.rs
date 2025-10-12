@@ -1,0 +1,133 @@
+use crate::grux_core::database_connection::get_database_connection;
+
+pub const CURRENT_DB_SCHEMA_VERSION: i32 = 1;
+
+pub struct DatabaseSchema {
+    pub version: i32,
+    pub init_sql: Vec<String>,
+}
+
+impl DatabaseSchema {
+    pub fn new() -> Self {
+        let init_sql = get_init_sql();
+
+        Self {
+            version: CURRENT_DB_SCHEMA_VERSION,
+            init_sql,
+        }
+    }
+}
+
+pub fn initialize_database() -> Result<(), String> {
+    let connection = get_database_connection()?;
+
+    // Get database schema and apply it
+    let database_schema = DatabaseSchema::new();
+    for sql in database_schema.init_sql {
+        connection.execute(&sql).map_err(|e| format!("Failed to execute init SQL: {}. Error: {}", sql, e))?;
+    }
+
+    Ok(())
+}
+
+//
+//  SQL Statements for initializing the database schema
+//
+fn get_init_sql() -> Vec<String> {
+    vec![
+        // Schema version table
+        "CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER PRIMARY KEY
+    );"
+        .to_string(),
+        // Insert the 0 schema version if not present, so that we will load defaults, which is typically at first load
+        format!("INSERT INTO schema_version (version) VALUES ({}) ON CONFLICT(version) DO NOTHING;", 0),
+        // File cache settings
+        "CREATE TABLE IF NOT EXISTS file_cache (
+        is_enabled BOOLEAN NOT NULL DEFAULT 1,
+        cache_item_size INTEGER NOT NULL DEFAULT 0,
+        cache_max_size_per_file INTEGER NOT NULL DEFAULT 0,
+        cache_item_time_between_checks INTEGER NOT NULL DEFAULT 0,
+        cleanup_thread_interval INTEGER NOT NULL DEFAULT 0,
+        max_item_lifetime INTEGER NOT NULL DEFAULT 0,
+        forced_eviction_threshold INTEGER NOT NULL DEFAULT 0
+    );"
+        .to_string(),
+        // Gzip configuration
+        "CREATE TABLE IF NOT EXISTS gzip (
+        is_enabled BOOLEAN NOT NULL DEFAULT 1,
+        compressible_content_types TEXT NOT NULL DEFAULT ''
+    );"
+        .to_string(),
+        // Server settings configuration
+        "CREATE TABLE IF NOT EXISTS server_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        setting_key TEXT NOT NULL,
+        setting_value TEXT NOT NULL
+    );"
+        .to_string(),
+        // Bindings table
+        "CREATE TABLE IF NOT EXISTS bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ip TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        is_admin BOOLEAN NOT NULL DEFAULT 0,
+        is_tls BOOLEAN NOT NULL DEFAULT 0
+    );"
+        .to_string(),
+        // Sites table
+        "CREATE TABLE IF NOT EXISTS sites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        binding_id INTEGER NOT NULL,
+        is_default BOOLEAN NOT NULL DEFAULT 0,
+        is_enabled BOOLEAN NOT NULL DEFAULT 1,
+        hostnames TEXT NOT NULL DEFAULT '',
+        web_root TEXT NOT NULL,
+        web_root_index_file_list TEXT NOT NULL DEFAULT '',
+        enabled_handlers TEXT NOT NULL DEFAULT '',
+        tls_cert_path TEXT NOT NULL DEFAULT '',
+        tls_cert_content TEXT NOT NULL DEFAULT '',
+        tls_key_path TEXT NOT NULL DEFAULT '',
+        tls_key_content TEXT NOT NULL DEFAULT '',
+        rewrite_functions TEXT NOT NULL DEFAULT ''
+    );"
+        .to_string(),
+        // Request handlers
+        "CREATE TABLE IF NOT EXISTS request_handlers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        is_enabled BOOLEAN NOT NULL DEFAULT 1,
+        name TEXT NOT NULL DEFAULT '',
+        handler_type TEXT NOT NULL DEFAULT '',
+        request_timeout INTEGER NOT NULL DEFAULT 30,
+        concurrent_threads INTEGER NOT NULL DEFAULT 0,
+        file_match TEXT NOT NULL DEFAULT '',
+        executable TEXT NOT NULL DEFAULT '',
+        ip_and_port TEXT NOT NULL DEFAULT '',
+        other_webroot TEXT NOT NULL DEFAULT '',
+        extra_handler_config TEXT NOT NULL DEFAULT '',
+        extra_environment TEXT NOT NULL DEFAULT ''
+    );"
+        .to_string(),
+        // Users table for admin portal
+        "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_login TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT 1
+            )"
+        .to_string(),
+        // User session table
+        "CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )"
+        .to_string(),
+    ]
+}

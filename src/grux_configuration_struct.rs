@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Server {
     pub bindings: Vec<Binding>,
@@ -9,6 +9,7 @@ pub struct Server {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Binding {
+    pub id: usize,
     pub ip: String,
     pub port: u16,
     pub is_admin: bool,
@@ -20,35 +21,31 @@ pub struct Binding {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Site {
+    pub id: usize,
     pub hostnames: Vec<String>,
     pub is_default: bool,
     pub is_enabled: bool,
     pub web_root: String,
     pub web_root_index_file_list: Vec<String>,
     pub enabled_handlers: Vec<String>, // List of enabled handler IDs for this site
-    // Optional PEM file paths for this specific site; if not provided and served over TLS, a self-signed cert may be generated
-    #[serde(default)]
-    pub tls_cert_path: Option<String>,
-    #[serde(default)]
-    pub tls_key_path: Option<String>,
+    // TLS certificate path or actual content
+    pub tls_cert_path: String,
+    pub tls_cert_content: String,
+    // TLS private key path or actual content
+    pub tls_key_path: String,
+    pub tls_key_content: String,
     pub rewrite_functions: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Configuration {
     pub servers: Vec<Server>,
-    pub admin_site: AdminSite,
     pub core: Core,
     pub request_handlers: Vec<RequestHandler>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AdminSite {
-    pub is_admin_portal_enabled: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileCache {
     pub is_enabled: bool,
     pub cache_item_size: usize,
@@ -59,25 +56,25 @@ pub struct FileCache {
     pub forced_eviction_threshold: usize, // 1-99 %
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Gzip {
     pub is_enabled: bool,
     pub compressible_content_types: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerSettings {
     pub max_body_size: usize, // in bytes
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Core {
     pub file_cache: FileCache,
     pub gzip: Gzip,
     pub server_settings: ServerSettings,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestHandler {
     pub id: String,                                  // Generated id, unique, so it can be referenced from sites as a handler
     pub is_enabled: bool,                            // Whether it is enabled or not
@@ -96,43 +93,53 @@ pub struct RequestHandler {
 impl Configuration {
     pub fn new() -> Self {
         let default_site = Site {
+            id: 0,
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
             web_root: "./www-default".to_string(),
             web_root_index_file_list: vec!["index.html".to_string()],
-            enabled_handlers: vec!["php_handler".to_string()], // For testing
+            enabled_handlers: vec!["1".to_string()], // For testing
             //enabled_handlers: vec![], // No specific handlers enabled by default
-            tls_cert_path: None,
-            tls_key_path: None,
+            tls_cert_path: "".to_string(),
+            tls_cert_content: "".to_string(),
+            tls_key_path: "".to_string(),
+            tls_key_content: "".to_string(),
             rewrite_functions: vec![],
         };
 
         let admin_site = Site {
+            id: 0,
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
             web_root: "./www-admin".to_string(),
             web_root_index_file_list: vec!["index.html".to_string()],
             enabled_handlers: vec![], // No specific handlers enabled by default
-            tls_cert_path: None,
-            tls_key_path: None,
+            tls_cert_path: "".to_string(),
+            tls_cert_content: "".to_string(),
+            tls_key_path: "".to_string(),
+            tls_key_content: "".to_string(),
             rewrite_functions: vec![],
         };
 
         let test_wp_site = Site {
+            id: 0,
             hostnames: vec!["gruxsite".to_string()],
             is_default: false,
             is_enabled: true,
             web_root: "D:/dev/test-sites/grux-wp-site1".to_string(),
             web_root_index_file_list: vec!["index.php".to_string()],
-            enabled_handlers: vec!["php_handler".to_string()], // For testing
-            tls_cert_path: None,
-            tls_key_path: None,
+            enabled_handlers: vec!["1".to_string()], // For testing
+            tls_cert_path: "".to_string(),
+            tls_cert_content: "".to_string(),
+            tls_key_path: "".to_string(),
+            tls_key_content: "".to_string(),
             rewrite_functions: vec!["OnlyWebRootIndexForSubdirs".to_string()],
         };
 
         let admin_binding = Binding {
+            id: 0,
             ip: "0.0.0.0".to_string(),
             port: 8000,
             is_admin: true,
@@ -141,6 +148,7 @@ impl Configuration {
         };
 
         let default_binding = Binding {
+            id: 0,
             ip: "0.0.0.0".to_string(),
             port: 80,
             is_admin: false,
@@ -149,6 +157,7 @@ impl Configuration {
         };
 
         let default_binding_tls = Binding {
+            id: 0,
             ip: "0.0.0.0".to_string(),
             port: 443,
             is_admin: false,
@@ -160,8 +169,6 @@ impl Configuration {
             bindings: vec![default_binding, default_binding_tls],
         };
         let admin_server = Server { bindings: vec![admin_binding] };
-
-        let admin_site = AdminSite { is_admin_portal_enabled: true };
 
         let file_cache = FileCache {
             is_enabled: false,
@@ -184,12 +191,18 @@ impl Configuration {
             ],
         };
 
-        let server_settings = ServerSettings { max_body_size: 10 * 1024 * 1024 }; // 10 MB
+        let server_settings = ServerSettings {
+            max_body_size: 10 * 1024 * 1024, // 10 MB
+        };
 
-        let core = Core { file_cache: file_cache, gzip: gzip, server_settings: server_settings };
+        let core = Core {
+            file_cache: file_cache,
+            gzip: gzip,
+            server_settings: server_settings,
+        };
 
         let request_handlers = vec![RequestHandler {
-            id: "php_handler".to_string(),
+            id: "1".to_string(),
             is_enabled: true,
             name: "PHP Handler".to_string(),
             handler_type: "php".to_string(),
@@ -207,7 +220,6 @@ impl Configuration {
 
         Configuration {
             servers: vec![default_server, admin_server],
-            admin_site,
             core,
             request_handlers,
         }
@@ -234,13 +246,6 @@ impl Configuration {
                 for error in server_errors {
                     errors.push(format!("Server {}: {}", server_idx + 1, error));
                 }
-            }
-        }
-
-        // Validate admin site
-        if let Err(admin_errors) = self.admin_site.validate() {
-            for error in admin_errors {
-                errors.push(format!("Admin site: {}", error));
             }
         }
 
@@ -398,38 +403,6 @@ impl Site {
             }
         }
 
-        // Validate TLS certificate paths if provided
-        if let Some(cert_path) = &self.tls_cert_path {
-            if cert_path.trim().is_empty() {
-                errors.push("TLS certificate path cannot be empty if specified".to_string());
-            }
-        }
-
-        if let Some(key_path) = &self.tls_key_path {
-            if key_path.trim().is_empty() {
-                errors.push("TLS key path cannot be empty if specified".to_string());
-            }
-        }
-
-        // If one TLS path is provided, both should be provided
-        if self.tls_cert_path.is_some() && self.tls_key_path.is_none() {
-            errors.push("TLS key path must be provided when certificate path is specified".to_string());
-        }
-        if self.tls_key_path.is_some() && self.tls_cert_path.is_none() {
-            errors.push("TLS certificate path must be provided when key path is specified".to_string());
-        }
-
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
-    }
-}
-
-impl AdminSite {
-    pub fn validate(&self) -> Result<(), Vec<String>> {
-        let errors = Vec::new();
-
-        // Currently only has is_admin_portal_enabled field which is a boolean,
-        // so no validation needed beyond the type system
-
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 }
@@ -528,8 +501,6 @@ impl RequestHandler {
         // Validate ID
         if self.id.trim().is_empty() {
             errors.push("Request handler ID cannot be empty".to_string());
-        } else if self.id.trim().len() < 3 {
-            errors.push("Request handler ID must be at least 3 characters long".to_string());
         } else if !self.id.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
             errors.push("Request handler ID can only contain alphanumeric characters, underscores, and hyphens".to_string());
         }

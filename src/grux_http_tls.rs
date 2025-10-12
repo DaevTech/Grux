@@ -1,8 +1,8 @@
-use crate::grux_configuration::{get_current_configuration_from_db, save_configuration};
+use crate::grux_configuration::{get_configuration, save_configuration};
 use crate::grux_configuration_struct::*;
-use log::{warn};
+use log::warn;
 use rand::Rng;
-use rustls_pki_types::pem::PemObject; // for from_pem_file, etc.
+use std::io::BufReader;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tls_listener::rustls as tokio_rustls;
 use tokio::fs;
@@ -46,7 +46,7 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert
 
     // Update configuration in DB so future runs use persisted files
     // Best-effort; failures shouldn't block startup
-    let mut configuration = get_current_configuration_from_db().map_err(|e| format!("Failed to load current configuration for TLS persistence: {}", e))?;
+    let mut configuration = get_configuration().clone();
 
     let mut updated = false;
     for server in configuration.servers.iter_mut() {
@@ -54,8 +54,8 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert
             if b.ip == binding.ip && b.port == binding.port && b.is_admin == binding.is_admin {
                 for s in b.sites.iter_mut() {
                     if s.web_root == site.web_root && s.hostnames == site.hostnames {
-                        s.tls_cert_path = Some(cert_path.clone());
-                        s.tls_key_path = Some(key_path.clone());
+                        s.tls_cert_path = cert_path.clone();
+                        s.tls_key_path = key_path.clone();
                         updated = true;
                         break;
                     }
@@ -71,7 +71,7 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert
     }
 
     if updated {
-        if let Err(e) = save_configuration(&configuration) {
+        if let Err(e) = save_configuration(&mut configuration) {
             warn!("Failed to persist TLS paths to configuration: {}", e);
         }
     }
@@ -99,42 +99,64 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
             sans.push("localhost".to_string());
         }
 
-        // Load from PEM if both provided; else generate
-        let (cert_chain, priv_key, maybe_pem): (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, Option<(String, String)>) = match (&site.tls_cert_path, &site.tls_key_path) {
-            (Some(cert_path), Some(key_path)) => match (CertificateDer::from_pem_file(cert_path), PrivateKeyDer::from_pem_file(key_path)) {
-                (Ok(cert), Ok(key)) => (vec![cert.into_owned()], key, None),
-                (cerr, kerr) => {
-                    warn!("Failed to load TLS certificates for site (cert: {:?}, key: {:?})", cerr.err(), kerr.err());
-                    warn!("Generating self signed certificates instead.");
-                    let rcgen::CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(sans.clone()).map_err(|e| format!("Failed to generate self-signed cert: {}", e))?;
-                    let cert_pem = cert.pem();
-                    let key_pem = signing_key.serialize_pem();
-                    (
-                        vec![CertificateDer::from(cert.der().to_vec())],
-                        PrivateKeyDer::try_from(signing_key.serialize_der()).map_err(|e| format!("Invalid key DER from rcgen: {}", e))?,
-                        Some((cert_pem, key_pem)),
-                    )
-                }
-            },
-            _ => {
-                let rcgen::CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(sans.clone()).map_err(|e| format!("Failed to generate self-signed cert: {}", e))?;
-                let cert_pem = cert.pem();
-                let key_pem = signing_key.serialize_pem();
-                (
-                    vec![CertificateDer::from(cert.der().to_vec())],
-                    PrivateKeyDer::try_from(signing_key.serialize_der()).map_err(|e| format!("Invalid key DER from rcgen: {}", e))?,
-                    Some((cert_pem, key_pem)),
-                )
-            }
+        let (cert_chain, priv_key) = if site.tls_cert_path.len() > 0 && site.tls_key_path.len() > 0 {
+            // Load from PEM files
+            let cert_file = std::fs::File::open(&site.tls_cert_path).map_err(|e| format!("Failed to open TLS cert file {}: {}", site.tls_cert_path, e))?;
+            let key_file = std::fs::File::open(&site.tls_key_path).map_err(|e| format!("Failed to open TLS key file {}: {}", site.tls_key_path, e))?;
+
+            let mut cert_reader = BufReader::new(cert_file);
+            let mut key_reader = BufReader::new(key_file);
+
+            let certs: Result<Vec<CertificateDer<'static>>, _> = rustls_pemfile::certs(&mut cert_reader).collect();
+            let cert_chain = certs.map_err(|e| format!("Failed to parse TLS cert file {}: {}", site.tls_cert_path, e))?;
+
+            let key_result = rustls_pemfile::private_key(&mut key_reader).map_err(|e| format!("Failed to parse TLS key file {}: {}", site.tls_key_path, e))?;
+            let priv_key = key_result.ok_or_else(|| format!("No private key found in {}", site.tls_key_path))?;
+
+            (cert_chain, priv_key)
+        } else if site.tls_cert_content.len() > 0 && site.tls_key_content.len() > 0 {
+            // Parse from content strings
+            let mut cert_cursor = std::io::Cursor::new(site.tls_cert_content.as_bytes());
+            let mut key_cursor = std::io::Cursor::new(site.tls_key_content.as_bytes());
+
+            let certs: Result<Vec<CertificateDer<'static>>, _> = rustls_pemfile::certs(&mut cert_cursor).collect();
+            let cert_chain = certs.map_err(|e| format!("Failed to parse TLS cert PEM content: {}", e))?;
+
+            let key_result = rustls_pemfile::private_key(&mut key_cursor).map_err(|e| format!("Failed to parse TLS key PEM content: {}", e))?;
+            let priv_key = key_result.ok_or_else(|| "No private key found in PEM content".to_string())?;
+
+            (cert_chain, priv_key)
+        } else {
+            // Generate self-signed cert
+            let rcgen::CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(sans.clone()).map_err(|e| format!("Failed to generate self-signed cert: {}", e))?;
+            let cert_pem = cert.pem();
+            let key_pem = signing_key.serialize_pem();
+
+            let mut cert_cursor = std::io::Cursor::new(cert_pem.as_bytes());
+            let mut key_cursor = std::io::Cursor::new(key_pem.as_bytes());
+
+            let certs: Result<Vec<CertificateDer<'static>>, _> = rustls_pemfile::certs(&mut cert_cursor).collect();
+            let cert_chain = certs.map_err(|e| format!("Failed to parse generated TLS cert PEM content: {}", e))?;
+
+            let key_result = rustls_pemfile::private_key(&mut key_cursor).map_err(|e| format!("Failed to parse generated TLS key PEM content: {}", e))?;
+            let priv_key = key_result.ok_or_else(|| "No private key found in generated PEM content".to_string())?;
+
+            // Persist generated cert/key to disk and update configuration
+            let _ = persist_generated_tls_for_site(binding, site, &cert_pem, &key_pem).await;
+
+            (cert_chain, priv_key)
         };
 
-        // Persist if generated
-        if let Some((cert_pem, key_pem)) = maybe_pem {
-            let _ = persist_generated_tls_for_site(binding, site, &cert_pem, &key_pem).await;
+        if cert_chain.is_empty() {
+            warn!(
+                "No valid certificates found in TLS cert for site with hostnames {:?}",
+                site.hostnames
+            );
+            continue;
         }
 
         // Build a signing key and certified key for rustls
-        let signing_key = ring_sign::any_supported_type(&priv_key).map_err(|e| format!("Unsupported private key type for rustls: {}", e))?;
+        let signing_key = ring_sign::any_supported_type(&priv_key).map_err(|e| format!("Unsupported private key type for: {}", e))?;
         let certified = RustlsCertifiedKey::new(cert_chain.clone(), signing_key);
 
         // Add each SAN as a mapping

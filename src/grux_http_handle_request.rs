@@ -26,7 +26,7 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
     let mut path = uri.path();
     let query = uri.query().unwrap_or("");
     let body_size = req.body().size_hint().upper().unwrap_or(0);
-    let scheme = uri.scheme_str().unwrap_or("");
+    let _scheme = uri.scheme_str().unwrap_or("");
     let headers = req.headers();
 
     // Extract hostname from headers
@@ -276,7 +276,7 @@ fn find_best_match_site<'a>(sites: &'a [Site], requested_hostname: &'a str) -> O
     site
 }
 
-async fn validate_request(headers: &HeaderMap, method: &str, uri: &str, path: &str, query: &str, body_size: u64) -> Result<(), Response<BoxBody<Bytes, hyper::Error>>> {
+async fn validate_request(headers: &HeaderMap, method: &str, _uri: &str, _path: &str, _query: &str, _body_size: u64) -> Result<(), Response<BoxBody<Bytes, hyper::Error>>> {
     // Here we can add any request validation logic if needed
 
     // [HTTP1.1] Basic validation: check for valid method
