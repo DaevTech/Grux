@@ -65,6 +65,8 @@ pub struct Gzip {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerSettings {
     pub max_body_size: usize, // in bytes
+    pub blocked_file_patterns: Vec<String>,
+    pub whitelisted_file_patterns: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -125,6 +127,9 @@ impl Configuration {
         // Push test site to the first server's first binding
         configuration.servers[0].bindings[0].sites.push(test_wp_site);
         configuration.servers[0].bindings[0].sites.push(testing_site);
+
+        // Enable file cache
+        configuration.core.file_cache.is_enabled = true;
     }
 
     pub fn get_default() -> Self {
@@ -231,10 +236,26 @@ impl Configuration {
                 },
                 gzip: Gzip {
                     is_enabled: false,
-                    compressible_content_types: vec![],
+                    compressible_content_types: vec![
+                        "text/".to_string(),
+                        "application/javascript".to_string(),
+                        "application/json".to_string(),
+                        "application/xml".to_string(),
+                        "application/xhtml+xml".to_string(),
+                        "application/x-javascript".to_string(),
+                        "text/css".to_string(),
+                        "text/html".to_string(),
+                        "text/javascript".to_string(),
+                        "application/x-yaml".to_string(),
+                        "image/svg+xml".to_string(),
+                        "application/font-woff".to_string(),
+                        "application/font-woff2".to_string(),
+                    ],
                 },
                 server_settings: ServerSettings {
                     max_body_size: 10 * 1024 * 1024, // 10 MB
+                    blocked_file_patterns: vec!["*.tmp".to_string(), "*.log".to_string(), "*.bak".to_string(), "*.config".to_string(), ".*".to_string(), "*.php".to_string()],
+                    whitelisted_file_patterns: vec!["*/.well-known/*".to_string()],
                 },
             },
             request_handlers: vec![],

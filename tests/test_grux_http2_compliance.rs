@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use rustls::{ClientConfig, ServerName, client::{ServerCertVerifier, ServerCertVerified}, Certificate, Error as TlsError};
 
+#[allow(dead_code)]
 /// HTTP/2 Compliance Test Suite for Grux Web Server
 ///
 /// This comprehensive test suite validates Grux's compliance with HTTP/2 specifications

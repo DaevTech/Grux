@@ -42,23 +42,6 @@ fn get_init_sql() -> Vec<String> {
         .to_string(),
         // Insert the 0 schema version if not present, so that we will load defaults, which is typically at first load
         format!("INSERT INTO schema_version (version) VALUES ({}) ON CONFLICT(version) DO NOTHING;", 0),
-        // File cache settings
-        "CREATE TABLE IF NOT EXISTS file_cache (
-        is_enabled BOOLEAN NOT NULL DEFAULT 1,
-        cache_item_size INTEGER NOT NULL DEFAULT 0,
-        cache_max_size_per_file INTEGER NOT NULL DEFAULT 0,
-        cache_item_time_between_checks INTEGER NOT NULL DEFAULT 0,
-        cleanup_thread_interval INTEGER NOT NULL DEFAULT 0,
-        max_item_lifetime INTEGER NOT NULL DEFAULT 0,
-        forced_eviction_threshold INTEGER NOT NULL DEFAULT 0
-    );"
-        .to_string(),
-        // Gzip configuration
-        "CREATE TABLE IF NOT EXISTS gzip (
-        is_enabled BOOLEAN NOT NULL DEFAULT 1,
-        compressible_content_types TEXT NOT NULL DEFAULT ''
-    );"
-        .to_string(),
         // Server settings configuration
         "CREATE TABLE IF NOT EXISTS server_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -82,6 +82,10 @@ impl FileCache {
         }
     }
 
+    pub fn get_current_item_count(&self) -> usize {
+        self.cache.read().unwrap().len()
+    }
+
     // Get file data
     pub fn get_file(&self, file_path: &str) -> Result<CachedFile, std::io::Error> {
         if let Some(cached_file) = self.cache.read().unwrap().get(file_path) {

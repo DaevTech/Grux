@@ -5,6 +5,7 @@ use crate::grux_configuration_struct::*;
 use crate::grux_core::monitoring::get_monitoring_state;
 use crate::grux_file_cache::CachedFile;
 use crate::grux_file_cache::get_file_cache;
+use crate::grux_file_util::check_path_secure;
 use crate::grux_file_util::get_full_file_path;
 use crate::grux_admin::http_admin_api::*;
 use crate::grux_http::http_util::*;
@@ -131,7 +132,12 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
     }
 
     // First, check if there is a specific file requested
-    let web_root = &site.web_root;
+    let web_root_result = get_full_file_path(&site.web_root);
+    if let Err(e) = web_root_result {
+        debug!("Failed to get full web root path: {}", e);
+        return Ok(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
+    }
+    let web_root = web_root_result.unwrap();
 
     // Get the cached file, if it exists
     let file_data_result = resolve_web_root_and_path_and_get_file(web_root.clone(), path.to_string());
@@ -184,6 +190,13 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
             trace!("Did not find index file: {}", file_path);
             return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
         }
+    }
+
+    // Do a safety check of the path, make sure it's still under the web root and not blocked
+    if !check_path_secure(&web_root, &file_path) {
+        trace!("File path is not secure: {}", file_path);
+        // We should probably not reveal that the file is blocked, so we return a 404
+        return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
     }
 
     // Extract the information we need before consuming the request for body extraction
@@ -252,10 +265,12 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
         }
     }
 
+    // Set any additional headers
     for (key, value) in additional_headers {
         response.headers_mut().insert(key, HeaderValue::from_str(value).unwrap());
     }
 
+    // Add standard headers
     add_standard_headers_to_response(&mut response);
 
     trace!("Responding with: {:?}", response);
@@ -331,7 +346,6 @@ async fn validate_request(http_version: &str, headers: &HeaderMap, method: &str,
             if let Ok(content_length_str) = content_length_header.to_str() {
                 if let Ok(content_length) = content_length_str.parse::<usize>() {
                     if content_length > max_body_size {
-                        println!("1Request body too large: {} > {}", content_length, max_body_size);
                         return Err(empty_response_with_status(hyper::StatusCode::PAYLOAD_TOO_LARGE));
                     }
                 }
@@ -340,7 +354,6 @@ async fn validate_request(http_version: &str, headers: &HeaderMap, method: &str,
 
         // Also check the actual body size
         if body_size > max_body_size {
-            println!("2Request body too large: {} > {}", body_size, max_body_size);
             return Err(empty_response_with_status(hyper::StatusCode::PAYLOAD_TOO_LARGE));
         }
     }

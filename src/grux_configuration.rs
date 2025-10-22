@@ -1,4 +1,4 @@
-use crate::grux_core::operation_mode::{get_operation_mode, OperationMode};
+use crate::grux_core::operation_mode::{OperationMode, get_operation_mode};
 use crate::{grux_configuration_struct::*, grux_core::database_connection::get_database_connection};
 use log::trace;
 use log::{info, warn};
@@ -130,44 +130,58 @@ pub fn load_configuration() -> Result<Configuration, String> {
 }
 
 fn save_core_config(connection: &Connection, core: &Core) -> Result<(), String> {
-    // Save file cache (single record)
-    connection
-        .execute(format!(
-            "INSERT OR REPLACE INTO file_cache (is_enabled, cache_item_size, cache_max_size_per_file, cache_item_time_between_checks, cleanup_thread_interval, max_item_lifetime, forced_eviction_threshold) VALUES ({}, {}, {}, {}, {}, {}, {})",
-            if core.file_cache.is_enabled { 1 } else { 0 },
-            core.file_cache.cache_item_size,
-            core.file_cache.cache_max_size_per_file,
-            core.file_cache.cache_item_time_between_checks,
-            core.file_cache.cleanup_thread_interval,
-            core.file_cache.max_item_lifetime,
-            core.file_cache.forced_eviction_threshold
-        ))
-        .map_err(|e| format!("Failed to insert file cache config: {}", e))?;
+    // Save file cache settings
+    save_server_settings(connection, "file_cache_is_enabled", &core.file_cache.is_enabled.to_string())?;
+    save_server_settings(connection, "file_cache_cache_item_size", &core.file_cache.cache_item_size.to_string())?;
+    save_server_settings(connection, "file_cache_cache_max_size_per_file", &core.file_cache.cache_max_size_per_file.to_string())?;
+    save_server_settings(connection, "file_cache_cache_item_time_between_checks", &core.file_cache.cache_item_time_between_checks.to_string())?;
+    save_server_settings(connection, "file_cache_cleanup_thread_interval", &core.file_cache.cleanup_thread_interval.to_string())?;
+    save_server_settings(connection, "file_cache_max_item_lifetime", &core.file_cache.max_item_lifetime.to_string())?;
+    save_server_settings(connection, "file_cache_forced_eviction_threshold", &core.file_cache.forced_eviction_threshold.to_string())?;
 
-    // Save gzip config with comma-separated content types
-    let content_types = core.gzip.compressible_content_types.join(",");
-    connection
-        .execute(format!(
-            "INSERT OR REPLACE INTO gzip (is_enabled, compressible_content_types) VALUES ({}, '{}')",
-            if core.gzip.is_enabled { 1 } else { 0 },
-            content_types.replace("'", "''") // Escape single quotes
-        ))
-        .map_err(|e| format!("Failed to insert gzip config: {}", e))?;
+    // Save gzip settings
+    save_server_settings(connection, "gzip_is_enabled", &core.gzip.is_enabled.to_string())?;
+    save_server_settings(connection, "gzip_compressible_content_types", &core.gzip.compressible_content_types.join(","))?;
 
     // Save server settings
     save_server_settings(connection, "max_body_size", &core.server_settings.max_body_size.to_string())?;
+    save_server_settings(connection, "blocked_file_patterns", &core.server_settings.blocked_file_patterns.join(","))?;
 
     Ok(())
 }
 
 fn save_server_settings(connection: &Connection, key: &str, value: &str) -> Result<(), String> {
-    connection
-        .execute(format!(
-            "INSERT OR REPLACE INTO server_settings (setting_key, setting_value) VALUES ('{}', '{}')",
-            key.replace("'", "''"),
-            value.replace("'", "''")
-        ))
-        .map_err(|e| format!("Failed to insert/update server setting {}: {}", key, e))?;
+    // check if it is insert or update
+    let mut statement = connection
+        .prepare(format!("SELECT COUNT(*) FROM server_settings WHERE setting_key = '{}'", key.replace("'", "''")))
+        .map_err(|e| format!("Failed to prepare server settings query: {}", e))?;
+    let exists = match statement.next().map_err(|e| format!("Failed to execute server settings query: {}", e))? {
+        State::Row => {
+            let count: i64 = statement.read(0).map_err(|e| format!("Failed to read count: {}", e))?;
+            count > 0
+        }
+        State::Done => false,
+    };
+    drop(statement);
+
+    if exists {
+        connection
+            .execute(format!(
+                "UPDATE server_settings SET setting_value = '{}' WHERE setting_key = '{}'",
+                value.replace("'", "''"),
+                key.replace("'", "''")
+            ))
+            .map_err(|e| format!("Failed to update server setting {}: {}", key, e))?;
+    } else {
+        connection
+            .execute(format!(
+                "INSERT INTO server_settings (setting_key, setting_value) VALUES ('{}', '{}')",
+                key.replace("'", "''"),
+                value.replace("'", "''")
+            ))
+            .map_err(|e| format!("Failed to insert/update server setting {}: {}", key, e))?;
+    }
+
     Ok(())
 }
 
@@ -304,81 +318,59 @@ fn save_request_handler(connection: &Connection, handler: &RequestHandler) -> Re
 }
 
 fn load_core_config(connection: &Connection) -> Result<Core, String> {
-    // Load file cache (single record with id=1)
-    let mut statement = connection.prepare("SELECT * FROM file_cache").map_err(|e| format!("Failed to prepare file cache query: {}", e))?;
-
-    let file_cache = match statement.next().map_err(|e| format!("Failed to execute file cache query: {}", e))? {
-        sqlite::State::Row => FileCache {
-            is_enabled: statement.read::<i64, _>(0).map_err(|e| format!("Failed to read file cache enabled: {}", e))? != 0,
-            cache_item_size: statement.read::<i64, _>(1).map_err(|e| format!("Failed to read cache item size: {}", e))? as usize,
-            cache_max_size_per_file: statement.read::<i64, _>(2).map_err(|e| format!("Failed to read max size per file type: {}", e))? as usize,
-            cache_item_time_between_checks: statement.read::<i64, _>(3).map_err(|e| format!("Failed to read time between checks: {}", e))? as usize,
-            cleanup_thread_interval: statement.read::<i64, _>(4).map_err(|e| format!("Failed to read cleanup interval: {}", e))? as usize,
-            max_item_lifetime: statement.read::<i64, _>(5).map_err(|e| format!("Failed to read max item lifetime: {}", e))? as usize,
-            forced_eviction_threshold: statement.read::<i64, _>(6).map_err(|e| format!("Failed to read eviction threshold: {}", e))? as usize,
-        },
-        sqlite::State::Done => {
-            warn!("No file cache configuration found, using default");
-            FileCache {
-                is_enabled: false,
-                cache_item_size: 1000,
-                cache_max_size_per_file: 1024 * 1024, // 1 MB default
-                cache_item_time_between_checks: 20,
-                cleanup_thread_interval: 10,
-                max_item_lifetime: 60,
-                forced_eviction_threshold: 70,
-            }
-        }
-    };
-
-    drop(statement);
-
-    // Load gzip configuration (single record with comma-separated content types)
-    let mut statement = connection.prepare("SELECT * FROM gzip").map_err(|e| format!("Failed to prepare gzip query: {}", e))?;
-
-    let (gzip_enabled, compressible_content_types) = match statement.next().map_err(|e| format!("Failed to execute gzip query: {}", e))? {
-        sqlite::State::Row => {
-            let enabled: i64 = statement.read(0).map_err(|e| format!("Failed to read gzip enabled: {}", e))?;
-            let content_types_str: String = statement.read(1).map_err(|e| format!("Failed to read content types: {}", e))?;
-            let content_types = content_types_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-            (enabled != 0, content_types)
-        }
-        sqlite::State::Done => {
-            warn!("No gzip configuration found, using default");
-            (true, vec!["text/".to_string(), "application/json".to_string(), "application/javascript".to_string()])
-        }
-    };
-
-    drop(statement);
-
-    // Load server settings, with key/value pairs
+    // Load server settings (single record with id=1)
     let mut statement = connection
-        .prepare("SELECT * FROM server_settings")
+        .prepare("SELECT DISTINCT setting_key, setting_value FROM server_settings")
         .map_err(|e| format!("Failed to prepare server settings query: {}", e))?;
 
-    // Each row is a key/value pair, where key should be checked against known settings in the server settings struct
-    let mut server_settings = ServerSettings { max_body_size: 0 };
+    // Get the default configuration for core
+    let configuration = Configuration::get_default();
+    let mut core = configuration.core;
 
-    while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute server settings query: {}", e))? {
+    // Each row is a key/value pair, where key should be checked against known settings in the server settings struct
+    while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute core settings query: {}", e))? {
         let key: String = statement.read(0).map_err(|e| format!("Failed to read key: {}", e))?;
-        let value: i64 = statement.read(1).map_err(|e| format!("Failed to read value: {}", e))?;
+        let value: String = statement.read(1).map_err(|e| format!("Failed to read value: {}", e))?;
 
         match key.as_str() {
-            "max_body_size" => server_settings.max_body_size = value as usize,
+            "file_cache_is_enabled" => {
+                core.file_cache.is_enabled = value.parse::<bool>().map_err(|e| format!("Failed to parse file_cache_is_enabled: {}", e))?;
+            }
+            "file_cache_cache_item_size" => {
+                core.file_cache.cache_item_size = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_cache_item_size: {}", e))?;
+            }
+            "file_cache_cache_max_size_per_file" => {
+                core.file_cache.cache_max_size_per_file = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_cache_max_size_per_file: {}", e))?;
+            }
+            "file_cache_cache_item_time_between_checks" => {
+                core.file_cache.cache_item_time_between_checks = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_cache_item_time_between_checks: {}", e))?;
+            }
+            "file_cache_cleanup_thread_interval" => {
+                core.file_cache.cleanup_thread_interval = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_cleanup_thread_interval: {}", e))?;
+            }
+            "file_cache_max_item_lifetime" => {
+                core.file_cache.max_item_lifetime = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_max_item_lifetime: {}", e))?;
+            }
+            "file_cache_forced_eviction_threshold" => {
+                core.file_cache.forced_eviction_threshold = value.parse::<usize>().map_err(|e| format!("Failed to parse file_cache_forced_eviction_threshold: {}", e))?;
+            }
+            "gzip_is_enabled" => {
+                core.gzip.is_enabled = value.parse::<bool>().map_err(|e| format!("Failed to parse gzip_is_enabled: {}", e))?;
+            }
+            "gzip_compressible_content_types" => {
+                core.gzip.compressible_content_types = parse_comma_separated_list(&value);
+            }
+            "max_body_size" => {
+                core.server_settings.max_body_size = value.parse::<usize>().map_err(|e| format!("Failed to parse max_body_size: {}", e))?;
+            }
+            "blocked_file_patterns" => {
+                core.server_settings.blocked_file_patterns = parse_comma_separated_list(&value);
+            }
             _ => continue,
         }
     }
 
-    drop(statement);
-
-    Ok(Core {
-        file_cache,
-        gzip: Gzip {
-            is_enabled: gzip_enabled,
-            compressible_content_types,
-        },
-        server_settings,
-    })
+    Ok(core)
 }
 
 fn load_servers(connection: &Connection) -> Result<Vec<Server>, String> {

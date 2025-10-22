@@ -2,6 +2,9 @@ use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use cached::proc_macro::cached;
+use log::trace;
+
+use crate::grux_http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
 
 /// Sanitizes and resolves a file path into an absolute path.
 /// - Expands relative paths to absolute.
@@ -101,4 +104,37 @@ pub fn replace_web_root_in_path(original_path: &str, old_web_root: &str, new_web
     } else {
         original_path.to_string() // Return original if it doesn't start with old web root
     }
+}
+
+// Check that the path is secure, by these tests:
+// - The path starts with the base path, to prevent directory traversal attacks
+// - The path does not contain any of the blocked file patterns
+pub fn check_path_secure(base_path: &str, test_path: &str) -> bool {
+    // Check that the test_path starts with the base_path
+    let base_path_cleaned = base_path.replace('\\', "/").trim_end_matches('/').to_string();
+    let test_path_cleaned = test_path.replace('\\', "/");
+    if !test_path_cleaned.starts_with(&base_path_cleaned) {
+        trace!("Path is blocked, as it does not start with the web root: {} file: {}", base_path_cleaned, test_path_cleaned);
+        return false;
+    }
+
+    let (_path, file) = split_path(&base_path_cleaned, &test_path_cleaned);
+
+    trace!("Check if file pattern is blocked or whitelisted: {}", &file);
+
+    // Check if it is whitelisted first
+    let pattern_whitelisting = get_whitelisted_file_pattern_matching();
+    if pattern_whitelisting.is_file_pattern_whitelisted(&test_path_cleaned) {
+        trace!("File pattern is whitelisted: {}", &test_path_cleaned);
+        return true;
+    }
+
+    // Check the blacklisted file patterns
+    let pattern_blocking = get_blocked_file_pattern_matching();
+    if pattern_blocking.is_file_pattern_blocked(&file) {
+        trace!("File pattern is blocked: {}", &file);
+        return false;
+    }
+
+    true
 }

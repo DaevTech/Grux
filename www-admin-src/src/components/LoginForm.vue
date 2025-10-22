@@ -116,10 +116,6 @@ const handleKeydown = (event) => {
         </button>
       </form>
 
-      <!-- Footer -->
-      <div class="login-footer">
-        <p>Default credentials: admin / admin123</p>
-      </div>
     </div>
   </div>
 </template>
@@ -257,21 +253,6 @@ const handleKeydown = (event) => {
   animation: spin 1s linear infinite;
 }
 
-.login-footer {
-  margin-top: 2rem;
-  text-align: center;
-}
-
-.login-footer p {
-  color: #666;
-  font-size: 0.8rem;
-  margin: 0;
-  padding: 1rem;
-  background: rgba(102, 126, 234, 0.05);
-  border-radius: 8px;
-  border: 1px solid rgba(102, 126, 234, 0.1);
-}
-
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -306,11 +287,6 @@ const handleKeydown = (event) => {
   .form-group input:focus {
     border-color: #667eea;
     background: rgba(255, 255, 255, 0.15);
-  }
-
-  .login-footer p {
-    color: #aaa;
-    background: rgba(102, 126, 234, 0.1);
   }
 }
 </style>

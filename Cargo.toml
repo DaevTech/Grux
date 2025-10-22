@@ -29,6 +29,7 @@ cached = "0.56.0"
 num_cpus = "1.17.0"
 rustls-pemfile = "2.2.0"
 random_password_generator = "0.1.0"
+wildcard = "0.3.0"
 
 [lib]
 name = "grux"

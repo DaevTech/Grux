@@ -1,8 +1,6 @@
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
-use hyper::{Response};
+use hyper::Response;
 use hyper::body::Bytes;
-
-
 
 pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
@@ -62,11 +60,7 @@ pub fn clean_url_path(path: &str) -> String {
     let result = parts.join("/");
 
     // Final safety check - ensure we never return a trailing slash
-    if result.ends_with('/') {
-        result[..result.len() - 1].to_string()
-    } else {
-        result
-    }
+    if result.ends_with('/') { result[..result.len() - 1].to_string() } else { result }
 }
 
 pub fn empty_response_with_status(status: hyper::StatusCode) -> Response<BoxBody<Bytes, hyper::Error>> {
@@ -77,8 +71,22 @@ pub fn empty_response_with_status(status: hyper::StatusCode) -> Response<BoxBody
 }
 
 pub fn add_standard_headers_to_response(resp: &mut Response<BoxBody<Bytes, hyper::Error>>) {
+    // Set our standard headers, if not already set
     for (key, value) in get_standard_headers() {
+        if resp.headers().contains_key(key) {
+            continue;
+        }
         resp.headers_mut().insert(key, value.parse().unwrap());
+    }
+
+    // Make sure we always a content type header, also when empty, then set octet-stream
+
+    if !resp.headers().contains_key("Content-Type") || resp.headers().get("Content-Type").unwrap().to_str().unwrap().is_empty() {
+        if resp.status() == hyper::StatusCode::OK {
+            resp.headers_mut().insert("Content-Type", "application/octet-stream".parse().unwrap());
+        } else {
+            resp.headers_mut().insert("Content-Type", "text/html".parse().unwrap());
+        }
     }
 }
 
