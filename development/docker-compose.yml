@@ -1,0 +1,34 @@
+services:
+  grux:
+    image: rust:alpine
+    ports:
+      - "80:80"     # HTTP
+      - "443:443"   # HTTPS
+      - "8000:8000" # Admin/API port
+    volumes:
+      # Mount project directories for development
+      - ../:/app
+    restart: unless-stopped
+    depends_on:
+      - php-fpm
+    extra_hosts:
+      - "gruxtest=127.0.0.1"
+    networks:
+      - grux-network
+    command: >
+      sh -c "apk add musl-dev && cd /app && cargo run -- -o DEV"
+
+  # PHP-FPM service for handling PHP requests
+  php-fpm:
+    image: php:8.2-fpm-alpine
+    volumes:
+      - ../www-testing:/var/www/html:ro  # Web content accessible to PHP-FPM
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+    networks:
+      - grux-network
+
+networks:
+  grux-network:
+    driver: bridge

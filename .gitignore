@@ -6,6 +6,5 @@ logs/*.log
 certs/*.pem
 www-admin-src/.yarn
 www-admin-src/.yarnrc.yml
-docker-helpers/php-fpm/data/
-docker-helpers/wordpress/data/db/#ib_16384_0.dblwr
-docker-helpers/wordpress/data/
+development/php-fpm/data/
+development/wordpress/data/

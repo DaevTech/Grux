@@ -466,9 +466,19 @@ impl ExternalRequestHandler for PHPHandler {
         full_file_path: &String,
         remote_ip: &String,
         http_version: &String,
-    ) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
-        // Use block_in_place to run async code in sync context - but do it cleanly
-        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(async { self.handle_request_async(method, uri, headers, body, site, full_file_path, remote_ip, http_version).await }))
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>>> + Send + '_>> {
+        // Clone the necessary data to avoid lifetime issues
+        let method = method.clone();
+        let uri = uri.clone();
+        let headers = headers.clone();
+        let site = site.clone();
+        let full_file_path = full_file_path.clone();
+        let remote_ip = remote_ip.clone();
+        let http_version = http_version.clone();
+        
+        Box::pin(async move {
+            self.handle_request_async(&method, &uri, &headers, body, &site, &full_file_path, &remote_ip, &http_version).await
+        })
     }
 
     // Return the handle type identifier
@@ -503,7 +513,7 @@ impl PHPHandler {
             }
         }
 
-        trace!("PHP handler received body of {} bytes", body.len());
+        trace!("PHP request body length: {} bytes", body.len());
 
         // Make sure the web root is full path
         let full_web_root_result = get_full_file_path(&site.web_root);
@@ -577,10 +587,9 @@ impl PHPHandler {
             }
         }
 
-        let timeout_duration = Duration::from_secs(self.request_timeout as u64);
-
+        // Process the FastCGI request with timeout
         match tokio::time::timeout(
-            timeout_duration,
+            Duration::from_secs(self.request_timeout as u64),
             self.process_fastcgi_request_direct(
                 method_str,
                 uri_str,

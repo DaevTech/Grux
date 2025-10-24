@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::external_request_handlers::external_request_handlers;
+use crate::grux_admin::http_admin_api::*;
 use crate::grux_configuration_struct::*;
 use crate::grux_core::monitoring::get_monitoring_state;
 use crate::grux_file_cache::CachedFile;
 use crate::grux_file_cache::get_file_cache;
 use crate::grux_file_util::check_path_secure;
 use crate::grux_file_util::get_full_file_path;
-use crate::grux_admin::http_admin_api::*;
 use crate::grux_http::http_util::*;
 use http_body_util::BodyExt;
 use http_body_util::combinators::BoxBody;
@@ -192,13 +192,6 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
         }
     }
 
-    // Do a safety check of the path, make sure it's still under the web root and not blocked
-    if !check_path_secure(&web_root, &file_path) {
-        trace!("File path is not secure: {}", file_path);
-        // We should probably not reveal that the file is blocked, so we return a 404
-        return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
-    }
-
     // Extract the information we need before consuming the request for body extraction
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -230,10 +223,20 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
             let file_matches = handler.get_file_matches();
             if file_matches.iter().any(|m| file_path.ends_with(m)) {
                 trace!("Passing request to external handler {} for file {}", handler_id, file_path);
-                handler_response = handler.handle_request(&method, &uri, &headers, body_bytes.clone(), &site, &file_path, &remote_ip, &http_version);
+                handler_response = handler.handle_request(&method, &uri, &headers, body_bytes.clone(), &site, &file_path, &remote_ip, &http_version).await;
                 handler_did_stuff = true;
                 break; // Only handle with the first matching handler
             }
+        }
+    }
+
+    // Do a safety check of the path, make sure it's still under the web root and not blocked
+    if !handler_did_stuff {
+
+        if !check_path_secure(&web_root, &file_path) {
+            trace!("File path is not secure: {}", file_path);
+            // We should probably not reveal that the file is blocked, so we return a 404
+            return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
         }
     }
 

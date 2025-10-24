@@ -7,7 +7,7 @@ use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::Bytes;
 use log::debug;
-use std::{collections::HashMap, sync::OnceLock};
+use std::{collections::HashMap, sync::OnceLock, pin::Pin, future::Future};
 
 
 pub struct ExternalRequestHandlers {
@@ -32,7 +32,7 @@ pub trait ExternalRequestHandler: Send + Sync {
         full_file_path: &String,
         remote_ip: &String,
         http_version: &String,
-    ) -> Response<BoxBody<Bytes, hyper::Error>>;
+    ) -> Pin<Box<dyn Future<Output = Response<BoxBody<Bytes, hyper::Error>>> + Send + '_>>;
     fn get_handler_type(&self) -> String;
 }
 

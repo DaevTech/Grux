@@ -1,5 +1,5 @@
 # Use the latest official Rust image based on Alpine Linux
-FROM rust:alpine as builder
+FROM rust:alpine AS builder
 
 # Install required system dependencies for building
 RUN apk add --no-cache \
@@ -42,14 +42,12 @@ WORKDIR /app
 COPY --from=builder /usr/src/grux/target/release/grux /app/grux
 
 # Create necessary directories and set ownership
-RUN mkdir -p /app/logs /app/certs /app/www-default /app/www-admin /app/temp_test_data && \
+RUN mkdir -p /app/logs /app/certs /app/www-default && \
     chown -R grux:grux /app
 
 # Copy project files and directories (these will be mounted in development)
 # But we'll create the structure for when running standalone
-COPY --chown=grux:grux certs/ /app/certs/
 COPY --chown=grux:grux www-default/ /app/www-default/
-COPY --chown=grux:grux www-admin/ /app/www-admin/
 
 # Switch to the non-root user
 USER grux
@@ -57,12 +55,8 @@ USER grux
 # Expose the required ports
 EXPOSE 80 443 8000
 
-# Set environment variables
-ENV RUST_LOG=info
-ENV GRUX_CONFIG_PATH=/app/config
-
 # Create a default volume for configuration
-VOLUME ["/app/config", "/app/logs", "/app/certs", "/app/www-default", "/app/www-admin"]
+VOLUME ["/app/logs", "/app/certs", "/app/www-default", "/app/www-admin"]
 
 # Command to run the application
 CMD ["./grux"]

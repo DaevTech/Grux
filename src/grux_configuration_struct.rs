@@ -121,7 +121,7 @@ impl Configuration {
             tls_cert_content: "".to_string(),
             tls_key_path: "".to_string(),
             tls_key_content: "".to_string(),
-            rewrite_functions: vec!["OnlyWebRootIndexForSubdirs".to_string()],
+            rewrite_functions: vec![],
         };
 
         // Push test site to the first server's first binding
@@ -206,7 +206,7 @@ impl Configuration {
             concurrent_threads: 0, // 0 = automatically based on CPU cores on this machine - If PHP
             file_match: vec![".php".to_string()],
             executable: "D:/dev/php/8.4.13nts/php-cgi.exe".to_string(), // Path to the PHP CGI executable (windows only)
-            //ip_and_port: "127.0.0.1:9000".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
+            //ip_and_port: "php-fpm:9000".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
             ip_and_port: "".to_string(), // IP and port to connect to the handler (only for FastCGI, like PHP-FPM - primarily Linux, but also Windows with something like php-cgi.exe running in fastcgi mode or php-fpm in Docker/WSL)
             //other_webroot: "/var/www/html".to_string(),
             other_webroot: "".to_string(),
@@ -254,7 +254,14 @@ impl Configuration {
                 },
                 server_settings: ServerSettings {
                     max_body_size: 10 * 1024 * 1024, // 10 MB
-                    blocked_file_patterns: vec!["*.tmp".to_string(), "*.log".to_string(), "*.bak".to_string(), "*.config".to_string(), ".*".to_string(), "*.php".to_string()],
+                    blocked_file_patterns: vec![
+                        "*.tmp".to_string(),
+                        "*.log".to_string(),
+                        "*.bak".to_string(),
+                        "*.config".to_string(),
+                        ".*".to_string(),
+                        "*.php".to_string(),
+                    ],
                     whitelisted_file_patterns: vec!["*/.well-known/*".to_string()],
                 },
             },
@@ -598,9 +605,11 @@ impl RequestHandler {
                 if parts.len() != 2 {
                     errors.push("IP and port must be in format 'IP:PORT'".to_string());
                 } else {
-                    // Validate IP part
-                    if parts[0].parse::<std::net::IpAddr>().is_err() {
-                        errors.push(format!("Invalid IP address in '{}': {}", self.ip_and_port, parts[0]));
+                    // Validate IP part, which can be an IP address or hostname
+                    if parts[0].contains('.') {
+                        if parts[0].parse::<std::net::IpAddr>().is_err() {
+                            errors.push(format!("Invalid IP address '{}': {}", self.ip_and_port, parts[0]));
+                        }
                     }
 
                     // Validate port part

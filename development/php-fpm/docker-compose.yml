@@ -3,13 +3,12 @@ services:
   grux-php-fpm:
     image: php:8.2-fpm-alpine
     volumes:
-#      - ../../www-default:/var/www/html:ro  # Web content accessible to PHP-FPM
-      - D:/dev/test-sites/grux-wp-site1:/var/www/html  # Web content accessible to PHP-FPM
+      - ../../www-testing:/var/www/html:ro  # Web content accessible to PHP-FPM
     ports:
       - "9000:9000"
     restart: unless-stopped
     extra_hosts:
-      - "gruxsite=192.168.4.62"
+      - "gruxtest=127.0.0.1"
     command:
     - /bin/sh
     - -c
@@ -18,13 +17,3 @@ services:
         docker-php-ext-install opcache
         echo "extension installed.....starting php-fpm........................................"
         php-fpm
-
-  grux-dev-db:
-    image: mysql:8
-    restart: always
-    ports:
-      - "3306:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=root
-    volumes:
-      - ./data:/var/lib/mysql
