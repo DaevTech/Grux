@@ -4,8 +4,9 @@ use crate::grux_file_util::{get_full_file_path, replace_web_root_in_path, split_
 use crate::grux_http::http_util::*;
 use crate::grux_port_manager::PortManager;
 use http_body_util::combinators::BoxBody;
+use hyper::body::Bytes;
+use hyper::{HeaderMap, Response};
 use log::{error, trace, warn};
-use std::collections::HashMap;
 use std::sync::{
     Arc,
     atomic::{AtomicU16, Ordering},
@@ -456,62 +457,29 @@ impl ExternalRequestHandler for PHPHandler {
     /// 3. Return the HTTP response
     ///
     /// This eliminates all complex channel/spawning logic for maximum concurrency.
-    fn handle_request(
+    async fn handle_request(
         &self,
         method: &hyper::Method,
         uri: &hyper::Uri,
         headers: &hyper::HeaderMap,
-        body: Vec<u8>,
+        body: &Vec<u8>,
         site: &Site,
         full_file_path: &String,
         remote_ip: &String,
         http_version: &String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>>> + Send + '_>> {
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
         // Clone the necessary data to avoid lifetime issues
         let method = method.clone();
         let uri = uri.clone();
-        let headers = headers.clone();
         let site = site.clone();
         let full_file_path = full_file_path.clone();
         let remote_ip = remote_ip.clone();
         let http_version = http_version.clone();
-        
-        Box::pin(async move {
-            self.handle_request_async(&method, &uri, &headers, body, &site, &full_file_path, &remote_ip, &http_version).await
-        })
-    }
 
-    // Return the handle type identifier
-    fn get_handler_type(&self) -> String {
-        "php".to_string()
-    }
-}
-
-impl PHPHandler {
-    /// The actual async implementation of request handling
-    async fn handle_request_async(
-        &self,
-        method: &hyper::Method,
-        uri: &hyper::Uri,
-        headers: &hyper::HeaderMap,
-        body: Vec<u8>,
-        site: &Site,
-        full_file_path: &String,
-        remote_ip: &String,
-        http_version: &String,
-    ) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
         // Extract request data
         let method_str = method.to_string();
         let uri_str = uri.to_string();
         let path = uri.path();
-
-        // Convert headers to HashMap
-        let mut headers_map = HashMap::new();
-        for (key, value) in headers {
-            if let Ok(value_str) = value.to_str() {
-                headers_map.insert(key.to_string(), value_str.to_string());
-            }
-        }
 
         trace!("PHP request body length: {} bytes", body.len());
 
@@ -519,7 +487,7 @@ impl PHPHandler {
         let full_web_root_result = get_full_file_path(&site.web_root);
         if let Err(e) = full_web_root_result {
             trace!("Error resolving file path for web root {}: {}", site.web_root, e);
-            return empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+            return Ok(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
         }
         let full_web_root = full_web_root_result.unwrap();
 
@@ -565,7 +533,7 @@ impl PHPHandler {
                         trace!("PHP-CGI process not running, starting it now...");
                         if let Err(e) = process_guard.start().await {
                             error!("Failed to start PHP-CGI process on first request: {}", e);
-                            return empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+                            return Ok(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
                         }
                         port = process_guard.get_port();
                     }
@@ -582,7 +550,7 @@ impl PHPHandler {
                     ip_and_port = format!("127.0.0.1:{}", port);
                 } else {
                     error!("PHP-CGI process does not have a valid port even after attempting to start it");
-                    return empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+                    return Ok(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
                 }
             }
         }
@@ -594,7 +562,7 @@ impl PHPHandler {
                 method_str,
                 uri_str,
                 path.to_string(),
-                headers_map,
+                &headers,
                 body,
                 full_file_path.clone(),
                 full_web_root,
@@ -609,23 +577,30 @@ impl PHPHandler {
         {
             Ok(response) => {
                 trace!("PHP Request completed successfully");
-                response
+                Ok(response)
             }
             Err(_) => {
                 error!("PHP Request timed out");
-                empty_response_with_status(hyper::StatusCode::GATEWAY_TIMEOUT)
+                Ok(empty_response_with_status(hyper::StatusCode::GATEWAY_TIMEOUT))
             }
         }
     }
 
+    // Return the handle type identifier
+    fn get_handler_type(&self) -> String {
+        "php".to_string()
+    }
+}
+
+impl PHPHandler {
     /// Process FastCGI request directly without any channels or complex async spawning
     async fn process_fastcgi_request_direct(
         &self,
         method: String,
         uri: String,
         path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
+        headers: &HeaderMap,
+        body: &Vec<u8>,
         script_file: String,
         local_web_root: String,
         is_https: bool,
@@ -633,7 +608,7 @@ impl PHPHandler {
         server_port: u16,
         http_version: String,
         ip_and_port: String,
-    ) -> hyper::Response<BoxBody<hyper::body::Bytes, hyper::Error>> {
+    ) -> Response<BoxBody<Bytes, hyper::Error>> {
         let available_permits = self.connection_semaphore.available_permits();
         trace!("Acquiring connection permit for FastCGI server at {} (available permits: {})", ip_and_port, available_permits);
 
@@ -715,14 +690,20 @@ impl PHPHandler {
         params.push(("REDIRECT_STATUS".to_string(), "200".to_string()));
 
         // Add HTTP headers as CGI variables
-        for (key, value) in &headers {
-            let cgi_key = format!("HTTP_{}", key.to_uppercase().replace('-', "_"));
-            params.push((cgi_key, value.clone()));
+        for (key, value) in headers.iter() {
+            let key_str = key.to_string();
+
+            // Try converting the value to a &str
+            if let Ok(value_str) = value.to_str() {
+                params.push((key_str, value_str.to_string()));
+            }
         }
 
         // Set content type if present
         if let Some(content_type) = headers.get("content-type") {
-            params.push(("CONTENT_TYPE".to_string(), content_type.clone()));
+            if let Ok(content_type) = content_type.to_str() {
+                params.push(("CONTENT_TYPE".to_string(), content_type.to_string()));
+            }
         }
 
         // Send FastCGI request

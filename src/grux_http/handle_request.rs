@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use crate::external_request_handlers::external_request_handlers;
 use crate::grux_admin::http_admin_api::*;
 use crate::grux_configuration_struct::*;
@@ -217,22 +216,37 @@ pub async fn handle_request(req: Request<hyper::body::Incoming>, binding: Bindin
     // We only go through the handlers that are active for this site
     let mut handler_response = Response::new(full(""));
     let mut handler_did_stuff = false;
+    let mut handler_had_error = false;
+    let external_request_handlers = external_request_handlers::get_request_handlers();
+
     for handler_id in &site.enabled_handlers {
-        let handler = external_request_handlers::get_request_handler_by_id(handler_id);
-        if let Some(handler) = handler {
-            let file_matches = handler.get_file_matches();
-            if file_matches.iter().any(|m| file_path.ends_with(m)) {
-                trace!("Passing request to external handler {} for file {}", handler_id, file_path);
-                handler_response = handler.handle_request(&method, &uri, &headers, body_bytes.clone(), &site, &file_path, &remote_ip, &http_version).await;
+        let handler_response_result = external_request_handlers
+            .handle_external_request(handler_id, &method, &uri, &headers, &body_bytes, &site, &file_path, &remote_ip, &http_version)
+            .await;
+        handler_response = match handler_response_result {
+            Ok(resp) => {
                 handler_did_stuff = true;
-                break; // Only handle with the first matching handler
+                resp
             }
+            Err(e) => {
+                debug!("Error from external handler {}: {}", handler_id, e);
+                handler_did_stuff = true;
+                handler_had_error = true;
+                empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        };
+        if handler_did_stuff {
+            break;
         }
+    }
+
+    // If the handler had an error, we return the error response
+    if handler_had_error {
+        return Ok(handler_response);
     }
 
     // Do a safety check of the path, make sure it's still under the web root and not blocked
     if !handler_did_stuff {
-
         if !check_path_secure(&web_root, &file_path) {
             trace!("File path is not secure: {}", file_path);
             // We should probably not reveal that the file is blocked, so we return a 404
