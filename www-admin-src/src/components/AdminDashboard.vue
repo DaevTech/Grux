@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
 import LogViewer from './LogViewer.vue';
+import ConfigurationEditor from './ConfigurationEditor.vue';
 
 // Define props and emits
 const props = defineProps({
@@ -241,7 +242,7 @@ onMounted(() => {
 
                             <div class="stat-card">
                                 <div class="stat-header">
-                                    <h3>Total Requests Served</h3>
+                                    <h3>Requests Served</h3>
                                 </div>
                                 <div class="stat-value">{{ formatRequestCount(stats.requests) }}</div>
                                 <div class="stat-subtitle">~ {{ stats.requestsPerSec }} req/sec right now</div>
@@ -276,6 +277,11 @@ onMounted(() => {
                 <!-- Logs View -->
                 <div v-else-if="activeView === 'logs'" class="view-content">
                     <LogViewer :user="user" />
+                </div>
+
+                <!-- Configuration View -->
+                <div v-else-if="activeView === 'configuration'" class="view-content">
+                    <ConfigurationEditor :user="user" />
                 </div>
 
                 <!-- Other Views -->

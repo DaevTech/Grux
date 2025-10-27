@@ -1,5 +1,5 @@
-use crate::grux_configuration::*;
-use crate::grux_configuration_struct::*;
+use crate::configuration::binding::Binding;
+use crate::configuration::load_configuration::get_configuration;
 use crate::grux_http::handle_request::handle_request_entry;
 use crate::grux_http::http_tls::build_tls_acceptor;
 use futures::future::join_all;
@@ -17,32 +17,24 @@ pub async fn initialize_server() -> Result<(), Box<dyn std::error::Error + Send 
     let config = get_configuration();
 
     // Figure out what we want to start
-    let servers: &Vec<Server> = &config.servers;
-    if servers.is_empty() {
-        error!("No servers configured. Please check your configuration.");
-        return Err("No servers configured".into());
-    }
-
     let mut started_servers = Vec::new();
 
-    // Starting the defined client servers
-    for server in servers {
-        for binding in &server.bindings {
-            let ip = binding.ip.parse::<std::net::IpAddr>().map_err(|e| format!("Invalid IP address: {}", e))?;
-            let port = binding.port;
-            let addr = SocketAddr::new(ip, port);
+    // Starting listening on all configured bindings
+    for binding in &config.bindings {
+        let ip = binding.ip.parse::<std::net::IpAddr>().map_err(|e| format!("Invalid IP address: {}", e))?;
+        let port = binding.port;
+        let addr = SocketAddr::new(ip, port);
 
-            // Enforce admin bindings are TLS-only
-            if binding.is_admin && !binding.is_tls {
-                warn!("Admin binding requested without TLS on {}:{}. This is not recommended.", binding.ip, binding.port);
-            }
-
-            info!("Starting Grux server on {}", addr);
-
-            // Start listening on the specified address
-            let server = start_server_binding(binding);
-            started_servers.push(server);
+        // Enforce admin bindings are TLS-only
+        if binding.is_admin && !binding.is_tls {
+            warn!("Admin binding requested without TLS on {}:{}. This is not recommended.", binding.ip, binding.port);
         }
+
+        info!("Starting Grux server on {}", addr);
+
+        // Start listening on the specified address
+        let server = start_server_binding(binding);
+        started_servers.push(server);
     }
 
     // Wait for all servers to finish (which is never, unless one panics)

@@ -1,6 +1,8 @@
+use crate::configuration::binding::Binding;
+use crate::configuration::load_configuration::get_configuration;
+use crate::configuration::site::Site;
 use crate::external_request_handlers::external_request_handlers;
 use crate::grux_admin::http_admin_api::*;
-use crate::grux_configuration_struct::*;
 use crate::grux_core::monitoring::get_monitoring_state;
 use crate::grux_file_cache::CachedFile;
 use crate::grux_file_cache::get_file_cache;
@@ -43,8 +45,10 @@ pub async fn handle_request_entry(req: Request<hyper::body::Incoming>, binding: 
     };
     request_data.insert("http_version".to_string(), http_version);
 
+    let sites = binding.get_sites();
+
     // Figure out which site we are serving
-    let site = find_best_match_site(&binding.sites, &requested_hostname);
+    let site = find_best_match_site(&sites, &requested_hostname);
     if let None = site {
         return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
     }
@@ -81,7 +85,7 @@ pub async fn handle_request_entry(req: Request<hyper::body::Incoming>, binding: 
 }
 
 // Handle the incoming request
-async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, _site: &Site, request_data: &HashMap<String, String>) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, site: &Site, request_data: &HashMap<String, String>) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Count the request in monitoring
     get_monitoring_state().increment_requests_served();
 
@@ -93,7 +97,6 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
     let body_size = req.body().size_hint().upper().unwrap_or(0);
     let headers = req.headers();
     let http_version = request_data.get("http_version").cloned().unwrap_or_default();
-    let requested_hostname = request_data.get("requested_hostname").cloned().unwrap_or_default();
     let remote_ip = request_data.get("remote_ip").cloned().unwrap_or_default();
 
     // Validate the request
@@ -110,14 +113,6 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
     {
         return Ok(resp);
     }
-
-    // Figure out which site we are serving
-    let site = find_best_match_site(&binding.sites, &requested_hostname);
-    if let None = site {
-        return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
-    }
-    let site = site.unwrap();
-    trace!("Matched site with request: {:?}", site);
 
     // Put the rewrite functions in a hashmap, so we can easily check them
     let rewrite_functions = {
@@ -380,7 +375,7 @@ fn find_best_match_site<'a>(sites: &'a [Site], requested_hostname: &'a str) -> O
 
 async fn validate_request(http_version: &str, headers: &HeaderMap, method: &str, _uri: &str, _path: &str, _query: &str, body_size: usize) -> Result<(), Response<BoxBody<Bytes, hyper::Error>>> {
     // Here we can add any request validation logic if needed
-    let configuration = crate::grux_configuration::get_configuration();
+    let configuration = get_configuration();
 
     // Validation for HTTP/1.1 only
     if http_version == "HTTP/1.1" {

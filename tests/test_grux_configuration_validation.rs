@@ -1,4 +1,5 @@
-use grux::grux_configuration_struct::*;
+use grux::configuration::{binding::Binding, configuration::Configuration, core::Core, file_cache::FileCache, gzip::Gzip, request_handler::RequestHandler, server_settings::ServerSettings, site::Site};
+
 
 #[test]
 fn test_request_handler_validation_valid() {
@@ -242,11 +243,7 @@ fn test_configuration_full_validation() {
         port: 8080,
         is_admin: false,
         is_tls: false,
-        sites: vec![default_site],
-    };
-
-    let server = Server {
-        bindings: vec![binding],
+        sites: vec![],
     };
 
     let file_cache = FileCache {
@@ -277,7 +274,9 @@ fn test_configuration_full_validation() {
     };
 
     let config = Configuration {
-        servers: vec![server],
+        bindings: vec![binding],
+        sites: vec![default_site],
+        binding_sites: vec![],
         core,
         request_handlers: vec![create_valid_handler()],
     };

@@ -1,12 +1,13 @@
-use grux::grux_configuration;
 use std::fs;
 use std::path::Path;
+
+use grux::configuration::load_configuration::{check_configuration, get_configuration};
 
 #[test]
 fn test_configuration_same_reference() {
     // Load configuration twice
-    let config1 = grux_configuration::get_configuration();
-    let config2 = grux_configuration::get_configuration();
+    let config1 = get_configuration();
+    let config2 = get_configuration();
 
     // Check if both references point to the same instance
     assert!(std::ptr::eq(config1, config2), "Configuration instances should be the same");
@@ -28,7 +29,7 @@ fn test_load_configuration_with_existing_config() {
 
     fs::copy(original_db_path, copied_db_path).unwrap();
 
-    let result = grux_configuration::check_configuration();
+    let result = check_configuration();
     assert!(result.is_ok());
 
     assert!(fs::metadata(original_db_path).is_ok(), "Configuration database should exist");

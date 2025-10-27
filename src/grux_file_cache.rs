@@ -12,6 +12,8 @@ use std::{
 };
 use tokio::time::interval;
 
+use crate::configuration::load_configuration::get_configuration;
+
 pub struct FileCache {
     is_enabled: bool,
     cache: Arc<RwLock<HashMap<String, CachedFile>>>,
@@ -39,7 +41,7 @@ impl FileCache {
     /// max_file_size: Maximum size of individual files to cache (in bytes)
     pub fn new() -> Self {
         // Get configuration
-        let config = crate::grux_configuration::get_configuration();
+        let config = get_configuration();
         let file_data_config = &config.core.file_cache;
 
         let is_enabled = file_data_config.is_enabled;

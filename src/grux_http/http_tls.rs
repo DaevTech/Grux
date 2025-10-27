@@ -1,9 +1,7 @@
-use crate::grux_configuration::{get_configuration, save_configuration};
-use crate::grux_configuration_struct::*;
 use log::warn;
 use rand::Rng;
-use std::io::BufReader;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use std::io::BufReader;
 use tls_listener::rustls as tokio_rustls;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -13,8 +11,11 @@ use tokio_rustls::rustls::server::ResolvesServerCertUsingSni;
 use tokio_rustls::rustls::sign::CertifiedKey as RustlsCertifiedKey;
 use tokio_rustls::rustls::{self, ServerConfig as RustlsServerConfig};
 
+use crate::configuration::binding::Binding;
+use crate::configuration::site::Site;
+
 // Persist generated cert/key to disk and update configuration for a specific site
-pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert_pem: &str, key_pem: &str) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn persist_generated_tls_for_site(site: &mut Site, cert_pem: &str, key_pem: &str) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     // Ensure target directory exists
     let dir = "certs";
     fs::create_dir_all(dir).await?;
@@ -45,36 +46,9 @@ pub async fn persist_generated_tls_for_site(binding: &Binding, site: &Site, cert
     fs::rename(&key_tmp, &key_path).await?;
 
     // Update configuration in DB so future runs use persisted files
-    // Best-effort; failures shouldn't block startup
-    let mut configuration = get_configuration().clone();
 
-    let mut updated = false;
-    for server in configuration.servers.iter_mut() {
-        for b in server.bindings.iter_mut() {
-            if b.ip == binding.ip && b.port == binding.port && b.is_admin == binding.is_admin {
-                for s in b.sites.iter_mut() {
-                    if s.web_root == site.web_root && s.hostnames == site.hostnames {
-                        s.tls_cert_path = cert_path.clone();
-                        s.tls_key_path = key_path.clone();
-                        updated = true;
-                        break;
-                    }
-                }
-                if updated {
-                    break;
-                }
-            }
-        }
-        if updated {
-            break;
-        }
-    }
-
-    if updated {
-        if let Err(e) = save_configuration(&mut configuration) {
-            warn!("Failed to persist TLS paths to configuration: {}", e);
-        }
-    }
+    site.tls_cert_path = cert_path.clone();
+    site.tls_key_path = key_path.clone();
 
     Ok((cert_path, key_path))
 }
@@ -88,7 +62,7 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
     let mut have_default = false;
     let mut site_added = false;
 
-    for site in &binding.sites {
+    for site in binding.get_sites() {
         if !site.is_enabled {
             continue;
         }
@@ -141,17 +115,14 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
             let key_result = rustls_pemfile::private_key(&mut key_cursor).map_err(|e| format!("Failed to parse generated TLS key PEM content: {}", e))?;
             let priv_key = key_result.ok_or_else(|| "No private key found in generated PEM content".to_string())?;
 
-            // Persist generated cert/key to disk and update configuration
-            let _ = persist_generated_tls_for_site(binding, site, &cert_pem, &key_pem).await;
+            // Persist generated cert/key to disk (note: configuration update would need to be handled separately)
+            let _cert_paths = persist_generated_tls_for_site(&mut site.clone(), &cert_pem, &key_pem).await;
 
             (cert_chain, priv_key)
         };
 
         if cert_chain.is_empty() {
-            warn!(
-                "No valid certificates found in TLS cert for site with hostnames {:?}",
-                site.hostnames
-            );
+            warn!("No valid certificates found in TLS cert for site with hostnames {:?}", site.hostnames);
             continue;
         }
 

@@ -1,4 +1,7 @@
-use crate::grux_configuration_struct::Site;
+use crate::configuration::configuration::Configuration;
+use crate::configuration::load_configuration::get_configuration;
+use crate::configuration::save_configuration::save_configuration;
+use crate::configuration::site::Site;
 use crate::grux_core::admin_user::{LoginRequest, authenticate_user, create_session, invalidate_session, verify_session_token};
 use crate::grux_core::monitoring::get_monitoring_state;
 use crate::grux_http::http_util::full;
@@ -170,7 +173,7 @@ pub async fn admin_get_configuration_endpoint(req: &Request<hyper::body::Incomin
     }
 
     // Get the current configuration
-    let config = crate::grux_configuration::get_configuration();
+    let config = get_configuration();
     let json_config = match serde_json::to_string_pretty(&config) {
         Ok(json) => json,
         Err(e) => {
@@ -226,7 +229,7 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
     };
 
     // Parse JSON body into Configuration struct
-    let mut configuration: crate::grux_configuration_struct::Configuration = match serde_json::from_slice(&body_bytes) {
+    let mut configuration: Configuration = match serde_json::from_slice(&body_bytes) {
         Ok(config) => config,
         Err(e) => {
             error!("Failed to parse configuration JSON: {}", e);
@@ -242,7 +245,7 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
     };
 
     // Save the configuration
-    match crate::grux_configuration::save_configuration(&mut configuration) {
+    match save_configuration(&mut configuration) {
         Ok(true) => {
             info!("Configuration updated successfully");
             let success_response = serde_json::json!({

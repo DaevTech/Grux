@@ -1,6 +1,6 @@
+use grux::configuration::load_configuration::check_configuration;
 use grux::external_request_handlers::external_request_handlers;
 use grux::grux_admin::http_admin_api::initialize_admin_site;
-use grux::grux_configuration;
 use grux::grux_core::async_runtime_handlers;
 use grux::grux_core::async_runtime_handlers::AsyncRuntimeHandlers;
 use grux::grux_core::background_tasks::start_background_tasks;
@@ -67,7 +67,7 @@ fn start_grux_basics() {
     info!("Database initialized");
 
     // Load configuration and check for errors
-    let configuration_check_result = grux_configuration::check_configuration();
+    let configuration_check_result = check_configuration();
     if let Err(e) = configuration_check_result {
         error!("Failed to load configuration: {}", e);
         std::process::exit(1);

@@ -1,8 +1,4 @@
-use crate::{
-    external_request_handlers::php_handler::PHPHandler,
-    grux_configuration::get_configuration,
-    grux_configuration_struct::{RequestHandler, Server, Site}, grux_http::http_util::empty_response_with_status,
-};
+use crate::{configuration::{load_configuration::get_configuration, request_handler::RequestHandler, site::Site}, external_request_handlers::php_handler::PHPHandler, grux_http::http_util::empty_response_with_status};
 use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::Bytes;
@@ -43,20 +39,16 @@ impl ExternalRequestHandlers {
         let config = get_configuration();
 
         // Run through all the configured sites in configuration and determine which is actually referenced
-        let servers: &Vec<Server> = &config.servers;
         let mut handler_ids_used = HashMap::new();
 
-        for server in servers {
-            for binding in &server.bindings {
-                for site in &binding.sites {
-                    for handler in &site.enabled_handlers {
-                        if !handler_ids_used.contains_key(handler) {
-                            handler_ids_used.insert(handler.clone(), true);
-                        }
-                    }
+        for site in &config.sites {
+            for handler in &site.enabled_handlers {
+                if !handler_ids_used.contains_key(handler) {
+                    handler_ids_used.insert(handler.clone(), true);
                 }
             }
         }
+
         debug!("Enabled external request handlers found in configuration: {:?}", handler_ids_used);
 
         // Go through our configured handlers and load the ones we need

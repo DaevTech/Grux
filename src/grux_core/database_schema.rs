@@ -61,7 +61,6 @@ fn get_init_sql() -> Vec<String> {
         // Sites table
         "CREATE TABLE IF NOT EXISTS sites (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        binding_id INTEGER NOT NULL,
         is_default BOOLEAN NOT NULL DEFAULT 0,
         is_enabled BOOLEAN NOT NULL DEFAULT 1,
         hostnames TEXT NOT NULL DEFAULT '',
@@ -74,8 +73,17 @@ fn get_init_sql() -> Vec<String> {
         tls_key_content TEXT NOT NULL DEFAULT '',
         rewrite_functions TEXT NOT NULL DEFAULT '',
         access_log_enabled BOOLEAN NOT NULL DEFAULT 0,
-        access_log_path TEXT NOT NULL DEFAULT '',
-        FOREIGN KEY (binding_id) REFERENCES bindings (id) ON DELETE CASCADE
+        access_log_path TEXT NOT NULL DEFAULT ''
+    );"
+        .to_string(),
+        // Junction table for many-to-many relationship between bindings and sites
+        "CREATE TABLE IF NOT EXISTS binding_sites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        binding_id INTEGER NOT NULL,
+        site_id INTEGER NOT NULL,
+        FOREIGN KEY (binding_id) REFERENCES bindings (id) ON DELETE CASCADE,
+        FOREIGN KEY (site_id) REFERENCES sites (id) ON DELETE CASCADE,
+        UNIQUE(binding_id, site_id)
     );"
         .to_string(),
         // Request handlers

@@ -1,8 +1,9 @@
-use log::{error, info, trace};
+use log::{debug, error, trace};
 use std::thread::sleep;
 use std::time::Instant;
 use std::{collections::HashMap, sync::OnceLock};
 
+use crate::configuration::load_configuration::get_configuration;
 use crate::grux_file_util::get_full_file_path;
 use crate::logging::buffered_log::BufferedLog;
 
@@ -19,29 +20,26 @@ impl AccessLogBuffer {
         let default_log_path = get_full_file_path(&"./logs".to_string()).unwrap();
 
         // We get the config and add the logs we need
-        let config = crate::grux_configuration::get_configuration();
-        for server in &config.servers {
-            for binding in &server.bindings {
-                for site in &binding.sites {
-                    if !site.access_log_enabled {
-                        continue;
-                    }
+        let config = get_configuration();
 
-                    let site_id = site.id.clone().to_string();
-                    let log_file_path_result = get_full_file_path(&site.access_log_path);
-
-                    let log_file_path = match log_file_path_result {
-                        Ok(path) => path,
-                        Err(_) => {
-                            error!("Invalid access log path for site {}: {}. Using default {}.", site_id, site.access_log_path, default_log_path);
-                            let default_log_path_plus_site = format!("{}/{}.log", default_log_path, site_id);
-                            default_log_path_plus_site
-                        }
-                    };
-                    trace!("Initialized access log buffer for site {} at path {}", &site.id, &log_file_path);
-                    access_log_buffer.buffered_logs.insert(site_id.clone(), BufferedLog::new(site_id.clone(), log_file_path));
-                }
+        for site in &config.sites {
+            if !site.access_log_enabled {
+                continue;
             }
+
+            let site_id = site.id.clone().to_string();
+            let log_file_path_result = get_full_file_path(&site.access_log_path);
+
+            let log_file_path = match log_file_path_result {
+                Ok(path) => path,
+                Err(_) => {
+                    error!("Invalid access log path for site {}: {}. Using default {}.", site_id, site.access_log_path, default_log_path);
+                    let default_log_path_plus_site = format!("{}/{}.log", default_log_path, site_id);
+                    default_log_path_plus_site
+                }
+            };
+            trace!("Initialized access log buffer for site {} at path {}", &site.id, &log_file_path);
+            access_log_buffer.buffered_logs.insert(site_id.clone(), BufferedLog::new(site_id.clone(), log_file_path));
         }
 
         access_log_buffer
@@ -73,7 +71,7 @@ impl AccessLogBuffer {
             }
             let elapsed = start_time.elapsed().as_millis();
             if elapsed > 0 {
-                info!("Access log flush cycle completed in {} ms", elapsed);
+                debug!("Access log flush cycle completed in {} ms", elapsed);
             }
 
             // Ideally, this would be adjustable according to the work load (such as elapsed time to do a flush in average)

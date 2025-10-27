@@ -1,0 +1,31 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Gzip {
+    pub is_enabled: bool,
+    pub compressible_content_types: Vec<String>,
+}
+
+impl Gzip {
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Validate compressible content types
+        if self.is_enabled && self.compressible_content_types.is_empty() {
+            errors.push("At least one compressible content type must be specified when gzip is enabled".to_string());
+        }
+
+        for (content_type_idx, content_type) in self.compressible_content_types.iter().enumerate() {
+            if content_type.trim().is_empty() {
+                errors.push(format!("Content type {} cannot be empty", content_type_idx + 1));
+            }
+
+            // Basic validation for content type format
+            if !content_type.contains('/') && !content_type.ends_with('/') {
+                errors.push(format!("Content type '{}' appears to be invalid format (should contain '/' or end with '/')", content_type));
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}

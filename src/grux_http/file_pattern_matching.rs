@@ -1,8 +1,7 @@
 use log::trace;
 use wildcard::{Wildcard, WildcardBuilder};
-
-use crate::grux_configuration::get_configuration;
 use std::sync::OnceLock;
+use crate::configuration::load_configuration::get_configuration;
 
 pub struct BlockedFilePatternMatching<'a> {
     pub wildcards: Vec<Wildcard<'a>>,
