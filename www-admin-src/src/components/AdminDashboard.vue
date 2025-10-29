@@ -172,8 +172,8 @@ onMounted(() => {
         <aside :class="['sidebar', { collapsed: sidebarCollapsed }]">
             <div class="sidebar-header">
                 <div class="logo">
-                    <span class="logo-icon">🚀</span>
-                    <span v-if="!sidebarCollapsed" class="logo-text">Grux webserver</span>
+                    <span class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="39 55 146 146"><defs><linearGradient id="a" x1="48" y1="48" x2="208" y2="208" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#7C3AED"/><stop offset="100%" stop-color="#06B6D4"/></linearGradient></defs><path d="M176 64H80l-32 64 32 64h96v-64h-48" stroke="url(#a)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                    <span v-if="!sidebarCollapsed" class="logo-text">Grux admin</span>
                 </div>
             </div>
 
@@ -336,14 +336,14 @@ onMounted(() => {
 }
 
 .logo-icon {
-    font-size: 2rem;
-    flex-shrink: 0;
+    width: 50px;
 }
 
 .logo-text {
     font-size: 1.25rem;
     font-weight: 700;
     white-space: nowrap;
+    text-transform: uppercase;
 }
 
 .sidebar-nav {
