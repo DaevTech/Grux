@@ -1,0 +1,80 @@
+name: release
+
+on: workflow_dispatch
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            archive_ext: tar.gz
+            binary_ext: ''
+          - os: windows-latest
+            archive_ext: zip
+            binary_ext: .exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 'latest'
+
+    - name: Build Admin Portal
+      working-directory: www-admin-src
+      run: |
+        npm install
+        npm run build
+
+    - name: Build Grux (Release)
+      run: cargo build --release
+
+    - name: Extract version from Cargo.toml
+      id: version
+      shell: bash
+      run: |
+        VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
+
+    - name: Prepare Release Directory
+      shell: bash
+      run: |
+        mkdir -p release/grux
+        mkdir -p release/grux/db
+        mkdir -p release/grux/logs
+        mkdir -p release/grux/certs
+        cp target/release/grux${{ matrix.binary_ext }} release/grux/
+        cp -r www-admin release/grux/
+        cp -r www-default release/grux/
+        cp README.md release/grux/
+        cp LICENSE release/grux/
+
+    - name: Create Linux Archive
+      if: matrix.os == 'ubuntu-latest'
+      working-directory: release
+      run: tar -czf grux-${{ steps.version.outputs.version }}-linux-x64.tar.gz grux
+
+    - name: Create Windows Archive
+      if: matrix.os == 'windows-latest'
+      working-directory: release
+      shell: bash
+      run: 7z a -tzip grux-${{ steps.version.outputs.version }}-windows-x64.zip grux
+
+    - name: Upload Release Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: grux-${{ matrix.os }}
+        path: release/grux-*.${{ matrix.archive_ext }}
+        if-no-files-found: error
