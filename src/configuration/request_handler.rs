@@ -68,9 +68,14 @@ impl RequestHandler {
             }
         }
 
-        // Validate executable path
-        if self.executable.trim().is_empty() {
-            errors.push("Executable path cannot be empty".to_string());
+        // Validate that either executable or ip_and_port is set
+        if self.executable.trim().is_empty() && self.ip_and_port.trim().is_empty() {
+            errors.push("Executable path and ip and port cannot be empty".to_string());
+        }
+
+        // Validate that ip and port takes precedence if both are set
+        if !self.executable.trim().is_empty() && !self.ip_and_port.trim().is_empty() {
+            errors.push("Both executable path and ip and port are set; So remove one of them.".to_string());
         }
 
         // Validate IP and port

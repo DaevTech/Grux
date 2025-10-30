@@ -5,6 +5,8 @@ use sqlite::Connection;
 use uuid::Uuid;
 use random_password_generator::generate_password;
 
+use crate::grux_core::database_connection::get_database_connection;
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -69,7 +71,7 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
 }
 
 pub fn authenticate_user(username: &str, password: &str) -> Result<Option<User>, String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
+    let connection = get_database_connection()?;
 
     let mut statement = connection
         .prepare("SELECT id, username, password_hash, created_at, last_login, is_active FROM users WHERE username = ? AND is_active = 1")
@@ -128,7 +130,7 @@ pub fn authenticate_user(username: &str, password: &str) -> Result<Option<User>,
 }
 
 pub fn create_session(user: &User) -> Result<Session, String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
+    let connection = get_database_connection()?;
 
     let session_id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
@@ -161,7 +163,7 @@ pub fn create_session(user: &User) -> Result<Session, String> {
 }
 
 pub fn verify_session_token(token: &str) -> Result<Option<Session>, String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
+    let connection = get_database_connection()?;
 
     // Clean up expired sessions first
     cleanup_expired_sessions(&connection)?;
@@ -208,7 +210,7 @@ pub fn verify_session_token(token: &str) -> Result<Option<Session>, String> {
 }
 
 pub fn invalidate_session(token: &str) -> Result<bool, String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
+    let connection = get_database_connection()?;
 
     // First check if session exists
     let mut statement = connection
@@ -245,7 +247,7 @@ fn cleanup_expired_sessions(connection: &Connection) -> Result<(), String> {
 }
 
 pub fn cleanup_all_expired_sessions() -> Result<u64, String> {
-    let connection = sqlite::open("./grux.db").map_err(|e| format!("Failed to open database connection: {}", e))?;
+    let connection = get_database_connection()?;
 
     // First count the expired sessions
     let now = Utc::now().to_rfc3339();

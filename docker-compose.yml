@@ -10,6 +10,7 @@ services:
       - "8000:8000" # Admin/API port
     volumes:
       # Mount project directories for development
+      - ./db:/app/db
       - ./logs:/app/logs
       - ./certs:/app/certs
 #      - ./www-default:/app/www-default
@@ -22,7 +23,7 @@ services:
   # PHP-FPM service for handling PHP requests
   php-fpm:
     image: php:8.2-fpm-alpine
-    volumes:
+#    volumes:
 #      - ./www-default:/var/www/html:ro# Web content accessible to PHP-FPM
     ports:
       - "9000:9000"

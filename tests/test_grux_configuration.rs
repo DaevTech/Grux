@@ -17,7 +17,7 @@ fn test_configuration_same_reference() {
 fn test_load_configuration_with_existing_config() {
     // Create copy of the database for testing
     let copied_db_path = "./temp_test_data/grux_test_existing.db";
-    let original_db_path = "./grux.db";
+    let original_db_path = "./db/grux.db";
 
     if !Path::new("./temp_test_data").exists() {
         fs::create_dir_all("./temp_test_data").unwrap();

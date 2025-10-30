@@ -1,11 +1,11 @@
 # Use the latest official Rust image based on Alpine Linux
-FROM rust:alpine AS builder
+FROM rust:alpine AS grux-builder
 
 # Install required system dependencies for building
 RUN apk add --no-cache \
     musl-dev \
-    openssl-dev \
-    openssl-libs-static \
+#    openssl-dev \
+#    openssl-libs-static \
     pkgconfig \
     ca-certificates
 
@@ -24,6 +24,16 @@ COPY rustfmt.toml ./
 # Build the application in release mode
 RUN cargo build --release
 
+# Build the admin portal
+FROM node:25-alpine3.21 AS admin-portal
+
+WORKDIR /app
+
+COPY www-admin-src/yarn.lock www-admin-src/package.json ./
+RUN yarn install --frozen-lockfile
+COPY www-admin-src/ ./
+RUN yarn run build
+
 # Start a new stage for the runtime image
 FROM alpine:latest
 
@@ -39,10 +49,13 @@ RUN addgroup -g 1000 grux && \
 WORKDIR /app
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /usr/src/grux/target/release/grux /app/grux
+COPY --from=grux-builder /usr/src/grux/target/release/grux /app/grux
+
+# Copy the built admin portal from the admin-portal stage
+COPY --from=admin-portal /www-admin /app/www-admin/
 
 # Create necessary directories and set ownership
-RUN mkdir -p /app/logs /app/certs /app/www-default && \
+RUN mkdir -p /app/logs /app/certs /app/www-default /app/db && \
     chown -R grux:grux /app
 
 # Copy project files and directories (these will be mounted in development)
