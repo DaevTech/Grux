@@ -38,36 +38,22 @@ pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
     // Save core configuration (file cache, gzip, server settings)
     save_core_config(&connection, &config.core)?;
 
-    // Save bindings
-    for binding in &mut config.bindings {
+    // Clear and re-insert all bindings (simpler than update/delete logic)
+    connection
+        .execute("DELETE FROM bindings")
+        .map_err(|e| format!("Failed to clear existing bindings: {}", e))?;
+
+    for binding in &config.bindings {
         save_binding(&connection, binding)?;
     }
-    // Check if any of the bindings need to be deleted, if no longer present in config
-    let current_binding_ids: Vec<usize> = current_config.bindings.iter().map(|b| b.id).collect();
-    let new_binding_ids: Vec<usize> = config.bindings.iter().map(|b| b.id).collect();
-    for binding_id in current_binding_ids {
-        if !new_binding_ids.contains(&binding_id) && binding_id != 0 {
-            // Delete binding
-            connection
-                .execute(format!("DELETE FROM bindings WHERE id = {}", binding_id))
-                .map_err(|e| format!("Failed to delete binding with id {}: {}", binding_id, e))?;
-        }
-    }
 
-    // Save sites
-    for site in &mut config.sites {
+    // Clear and re-insert all sites (simpler than update/delete logic)
+    connection
+        .execute("DELETE FROM sites")
+        .map_err(|e| format!("Failed to clear existing sites: {}", e))?;
+
+    for site in &config.sites {
         save_site(&connection, site)?;
-    }
-    // Check if any of the sites need to be deleted, if no longer present in config
-    let current_site_ids: Vec<usize> = current_config.sites.iter().map(|s| s.id).collect();
-    let new_site_ids: Vec<usize> = config.sites.iter().map(|s| s.id).collect();
-    for site_id in current_site_ids {
-        if !new_site_ids.contains(&site_id) && site_id != 0 {
-            // Delete site
-            connection
-                .execute(format!("DELETE FROM sites WHERE id = {}", site_id))
-                .map_err(|e| format!("Failed to delete site with id {}: {}", site_id, e))?;
-        }
     }
 
     // Save the binding-site relationships
@@ -157,94 +143,47 @@ fn save_server_settings(connection: &Connection, key: &str, value: &str) -> Resu
     Ok(())
 }
 
-fn save_binding(connection: &Connection, binding: &mut Binding) -> Result<(), String> {
-    // Handle new bindings (id == 0) by setting id to NULL for auto-increment
-    let id_value = if binding.id == 0 { "NULL".to_string() } else { binding.id.to_string() };
-
-    // Use INSERT OR REPLACE to handle both new and existing bindings
+fn save_binding(connection: &Connection, binding: &Binding) -> Result<(), String> {
+    // Insert binding with explicit ID (all bindings are re-inserted after DELETE FROM bindings)
     connection
         .execute(format!(
-            "INSERT OR REPLACE INTO bindings (id, ip, port, is_admin, is_tls) VALUES ({}, '{}', {}, {}, {})",
-            id_value,
+            "INSERT INTO bindings (id, ip, port, is_admin, is_tls) VALUES ({}, '{}', {}, {}, {})",
+            binding.id,
             binding.ip.replace("'", "''"),
             binding.port,
             if binding.is_admin { 1 } else { 0 },
             if binding.is_tls { 1 } else { 0 }
         ))
-        .map_err(|e| format!("Failed to insert/replace binding: {}", e))?;
+        .map_err(|e| format!("Failed to insert binding: {}", e))?;
 
-    // If this was a new binding (id == 0), get the auto-generated ID
-    if binding.id == 0 {
-        let mut last_inserted_id_statement = connection
-            .prepare("SELECT last_insert_rowid()")
-            .map_err(|e| format!("Failed to prepare last_insert_rowid query: {}", e))?;
-
-        match last_inserted_id_statement.next().map_err(|e| format!("Failed to execute last_insert_rowid query: {}", e))? {
-            State::Row => binding.id = last_inserted_id_statement.read::<i64, _>(0).map_err(|e| format!("Failed to read last inserted id: {}", e))? as usize,
-            State::Done => binding.id = 0, // No ID found, assume 0
-        }
-        trace!("Inserted new binding with id: {:?}", binding.id);
-    } else {
-        trace!("Updated existing binding with id: {:?}", binding.id);
-    }
+    trace!("Inserted binding with id: {}", binding.id);
 
     Ok(())
 }
 
-pub fn save_site(connection: &Connection, site: &mut Site) -> Result<(), String> {
-    // Insert or update site
-    if site.id == 0 {
-        // New site, insert it
-        connection
-                .execute(format!(
-                    "INSERT INTO sites (is_default, is_enabled, hostnames, web_root, web_root_index_file_list, enabled_handlers, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, rewrite_functions, access_log_enabled, access_log_path) VALUES ({}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}')",
-                    if site.is_default { 1 } else { 0 },
-                    if site.is_enabled { 1 } else { 0 },
-                    site.hostnames.join(",").replace("'", "''"),
-                    site.web_root.replace("'", "''"),
-                    site.web_root_index_file_list.join(",").replace("'", "''"),
-                    site.enabled_handlers.join(",").replace("'", "''"),
-                    site.tls_cert_path.replace("'", "''"),
-                    site.tls_cert_content.replace("'", "''"),
-                    site.tls_key_path.replace("'", "''"),
-                    site.tls_key_content.replace("'", "''"),
-                    site.rewrite_functions.join(",").replace("'", "''"),
-                    if site.access_log_enabled { 1 } else { 0 },
-                    site.access_log_path.replace("'", "''")
-                ))
-                .map_err(|e| format!("Failed to insert site: {}", e))?;
-        trace!("Inserted new site: {:?}", site);
-        let mut last_inserted_id_statement = connection
-            .prepare("SELECT last_insert_rowid()")
-            .map_err(|e| format!("Failed to prepare last_insert_rowid query: {}", e))?;
+pub fn save_site(connection: &Connection, site: &Site) -> Result<(), String> {
+    // Insert site with explicit ID (all sites are re-inserted after DELETE FROM sites)
+    connection
+        .execute(format!(
+            "INSERT INTO sites (id, is_default, is_enabled, hostnames, web_root, web_root_index_file_list, enabled_handlers, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, rewrite_functions, access_log_enabled, access_log_path) VALUES ({}, {}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}')",
+            site.id,
+            if site.is_default { 1 } else { 0 },
+            if site.is_enabled { 1 } else { 0 },
+            site.hostnames.join(",").replace("'", "''"),
+            site.web_root.replace("'", "''"),
+            site.web_root_index_file_list.join(",").replace("'", "''"),
+            site.enabled_handlers.join(",").replace("'", "''"),
+            site.tls_cert_path.replace("'", "''"),
+            site.tls_cert_content.replace("'", "''"),
+            site.tls_key_path.replace("'", "''"),
+            site.tls_key_content.replace("'", "''"),
+            site.rewrite_functions.join(",").replace("'", "''"),
+            if site.access_log_enabled { 1 } else { 0 },
+            site.access_log_path.replace("'", "''")
+        ))
+        .map_err(|e| format!("Failed to insert site: {}", e))?;
 
-        match last_inserted_id_statement.next().map_err(|e| format!("Failed to execute last_insert_rowid query: {}", e))? {
-            State::Row => site.id = last_inserted_id_statement.read::<i64, _>(0).map_err(|e| format!("Failed to read last inserted id: {}", e))? as usize,
-            State::Done => site.id = 0, // No version found, assume 0
-        }
-        trace!("Inserted new site with id: {:?}", site.id);
-    } else {
-        // Existing site, update it
-        connection
-                .execute(format!(
-                    "UPDATE sites SET is_default = {}, is_enabled = {}, hostnames = '{}', web_root = '{}', web_root_index_file_list = '{}', enabled_handlers = '{}', tls_cert_path = '{}', tls_cert_content = '{}', tls_key_path = '{}', tls_key_content = '{}', rewrite_functions = '{}', access_log_enabled = {}, access_log_path = '{}' WHERE id = {}",
-                    if site.is_default { 1 } else { 0 },
-                    if site.is_enabled { 1 } else { 0 },
-                    site.hostnames.join(",").replace("'", "''"),
-                    site.web_root.replace("'", "''"),
-                    site.web_root_index_file_list.join(",").replace("'", "''"),
-                    site.enabled_handlers.join(",").replace("'", "''"),
-                    site.tls_cert_path.replace("'", "''"),
-                    site.tls_cert_content.replace("'", "''"),
-                    site.tls_key_path.replace("'", "''"),
-                    site.tls_key_content.replace("'", "''"),
-                    site.rewrite_functions.join(",").replace("'", "''"),
-                    if site.access_log_enabled { 1 } else { 0 },
-                    site.access_log_path.replace("'", "''"),
-                    site.id
-                ))
-                .map_err(|e| format!("Failed to update site: {}", e))?;
-    }
+    trace!("Inserted site with id: {}", site.id);
 
     Ok(())
 }

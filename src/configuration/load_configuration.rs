@@ -44,14 +44,6 @@ fn init() -> Result<Configuration, String> {
             // Process the binding-site relationships
             handle_relationship_binding_sites(&configuration.binding_sites, &mut configuration.bindings, &mut configuration.sites);
 
-            // For bindings and sites, we need to set all the id's to 0, so they will be saved correctly as new records
-            for binding in configuration.bindings.iter_mut() {
-                binding.id = 0;
-            }
-            for site in configuration.sites.iter_mut() {
-                site.id = 0;
-            }
-
             save_configuration(&mut configuration)?;
 
             // Update schema version to 1

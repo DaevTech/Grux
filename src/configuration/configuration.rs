@@ -169,7 +169,8 @@ impl Configuration {
         // Enable file cache
         configuration.core.file_cache.is_enabled = true;
 
-        configuration.request_handlers[0].executable = "D:/dev/php/8.4.13nts/php-cgi.exe".to_string()
+        configuration.request_handlers[0].executable = "D:/dev/php/8.4.13nts/php-cgi.exe".to_string();
+        configuration.request_handlers[0].ip_and_port = "".to_string();
     }
 
     pub fn get_default() -> Self {
