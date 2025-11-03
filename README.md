@@ -95,9 +95,10 @@ This auto-generated password is only written on first startup, so note it down s
 
 ![Screenshot of start up](https://github.com/DaevTech/Grux/blob/main/assets/startup_screenshot.png "Grux Admin Portal")
 
-![Screenshot of admin portal Monitoring](https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_monitoring.png "Grux Admin Portal Monitoring")
+<img src="https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_monitoring.png" alt="Grux Admin Portal Monitoring" width="600">
 
-![Screenshot of admin portal configuration](https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_configuration.png "Grux Admin Portal configuration")
+<img src="https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_configuration.png" alt="Grux Admin Portal configuration" width="600">
+
 
 ## Documentation
 
