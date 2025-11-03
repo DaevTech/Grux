@@ -18,9 +18,6 @@ COPY Cargo.toml Cargo.lock ./
 # Copy the source code
 COPY src/ ./src/
 
-# Copy additional project files that might be needed
-COPY rustfmt.toml ./
-
 # Build the application in release mode
 RUN cargo build --release
 
@@ -30,8 +27,11 @@ FROM node:25-alpine3.21 AS admin-portal
 WORKDIR /app
 
 COPY www-admin-src/yarn.lock www-admin-src/package.json ./
+
 RUN yarn install --frozen-lockfile
+
 COPY www-admin-src/ ./
+
 RUN yarn run build
 
 # Start a new stage for the runtime image

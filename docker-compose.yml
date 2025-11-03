@@ -1,9 +1,6 @@
 services:
   grux:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: grux:latest
+    image: ghcr.io/daevtech/grux:latest
     ports:
       - "80:80"     # HTTP
       - "443:443"   # HTTPS

@@ -22,20 +22,82 @@ Grux is a web server focused on high performance and ease of administration. It 
 
 To get started running Grux, there is a few options:
 
-### Using the binaries
+### Using the binaries directly
 
 1. Download the release appropriate for the system you want to run it on.
 2. This is a ready to go build right after it is extracted.
-3. Run the binary and check out http://127.0.0.1 for the default Grux page.
-4. To do configuration, go to https://127.0.0.1:8000 and login with the user "admin" and the password given in the output from the server on first run. Save it, as it will NOT be shown again.
-
-Please let us know what you think. Both what is nice about Grux and which problems you had, so we better can improve it.
+3. Run the binary and check out http://localhost for the default Grux page.
+4. To do configuration, go to https://localhost:8000 and login with the user "admin" and the password given in the output from the server on first run. Save it, as it will NOT be shown again.
 
 ### With Docker:
-Coming soon
+
+1. Make sure Docker is installed
+2. Open your terminal of choice (such as **bash** on Linux and **terminal** on Windows)
+3. Basic test: `docker run --name grux1 -p 80:80 -p 443:443 -p 8000:8000 -d ghcr.io/daevtech/grux:latest`
+4. Grux is now available on http://localhost and admin portal on https://localhost:8000
+5. Extended example to map in your own content:
+
+`docker run --name grux1 -p 80:80 -p 443:443 -p 8000:8000 -v ./my-web-content:/app/www-default:ro -v ./logs:/app/logs -v ./certs:/app/certs -v ./db:/app/db -d ghcr.io/daevtech/grux:latest`
+
+### With Docker Compose
+
+To better control the deployment of Grux instead of long docker commands, check out the docker-compose.yml in the Grux github repository root. That shows example to have persistent database, logs, certificates etc. This is really the way to go. So download it and adjust for your need.
+
+Run it in a terminal with `docker compose up -d` in the same place as the docker-compose.yml is.
+
+This is a basic example:
+```yml
+services:
+  grux:
+    image: ghcr.io/daevtech/grux:latest
+    ports:
+      - "80:80"     # HTTP
+      - "443:443"   # HTTPS
+      - "8000:8000" # Admin/API port
+    volumes:
+      # Mount project directories for development
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./certs:/app/certs
+#      - ./www-default:/app/www-default
+    restart: unless-stopped
+    depends_on:
+      - php-fpm
+    networks:
+      - grux-network
+
+  # PHP-FPM service for handling PHP requests
+  php-fpm:
+    image: php:8.2-fpm-alpine
+#    volumes:
+#      - ./www-default:/var/www/html:ro# Web content accessible to PHP-FPM
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+    networks:
+      - grux-network
+
+networks:
+  grux-network:
+    driver: bridge
+
+```
+
+
+
+## Admin portal
+
+Log in to admin portal with "admin" as username and password written in the server output.
+
+This auto-generated password is only written on first startup, so note it down somewhere safe.
 
 ## Screenshots
 
+![Screenshot of start up](https://github.com/DaevTech/Grux/blob/main/assets/startup_screenshot.png "Grux Admin Portal")
+
+![Screenshot of admin portal Monitoring](https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_monitoring.png "Grux Admin Portal Monitoring")
+
+![Screenshot of admin portal configuration](https://github.com/DaevTech/Grux/blob/main/assets/admin_portal_configuration.png "Grux Admin Portal configuration")
 
 ## Documentation
 
@@ -58,7 +120,7 @@ If you want admin portal running, you need to build that too.
 2. Go into /www-admin-src
 3. Run "npm run build"
 
-Grux can now be found on http://127.0.0.1 and admin portal on https://127.0.0.1:8000
+Grux can now be found on http://localhost and admin portal on https://localhost:8000
 
 ### Easy mode development with Docker compose:
 If you rather want total easy mode development, use the docker solution:
@@ -67,17 +129,17 @@ If you rather want total easy mode development, use the docker solution:
 2. Clone Grux repository with git
 3. Go into /development
 4. Run "docker compose up -d"
-5. After a while, Grux is running on http://127.0.0.1 and admin portal on https://127.0.0.1:8000
+5. After a while, Grux is running on http://localhost and admin portal on https://localhost:8000
 
 Log in to admin portal with "admin" as username and password written in the server output. Only written on first startup.
 
 After your changes is done, make sure it builds and tests are running.
 Submit a PR and wait for approval. We appreciate any contribution and improvements.
 
-## Licensing with commercial support
+## Licensing with commercial support or sponsoring
 
-Grux is free to use for everybody (and always will be), but if you need support in a commercial context, let us know and we will figure out a solution. Contact us on <contact@grux.eu>.
+Grux is free to use for everybody (and always will be), but if you need support in a commercial context or want to sponsor the project, let us know and we will figure out a solution. Contact us on <contact@grux.eu>.
 
 ## Authors
 
-[Brian Søgård Jensen](https://www.github.com/briansjensen) - Contact info: <contact@grux.eu>
+[Brian Søgård Jensen](https://www.github.com/briansjensen) - Contact info: <bsj@succesprojekter.dk>
