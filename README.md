@@ -6,6 +6,10 @@ Grux is a web server focused on high performance and ease of administration. It 
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 
+## State of development
+
+Grux is not yet production ready, as we are rather early in development. But it does work, so feel free to test it out :)
+
 ## Features
 
 - Serve files in fastest possible manner

@@ -171,9 +171,11 @@ impl FileCache {
     }
 
     // Check if a MIME type should be compressed
-    fn should_compress(&self, mime_type: &str, content_length: u64) -> bool {
+    pub fn should_compress(&self, mime_type: &str, content_length: u64) -> bool {
         if self.gzip_enabled {
-            return content_length > 1000 && content_length < (10 * 1024 * 1024) && self.compressible_content_types.iter().any(|ct| mime_type.starts_with(ct));
+            let check_should_compress = content_length > 1000 && content_length < (10 * 1024 * 1024) && self.compressible_content_types.iter().any(|ct| mime_type.starts_with(ct));
+            trace!("Should compress check for MIME type {} and content_length: {} - Result: {}", mime_type, content_length, check_should_compress);
+            return check_should_compress;
         }
         false
     }
@@ -281,7 +283,7 @@ impl FileCache {
     }
 
     /// Compress content using gzip
-    fn compress_content(&self, content: &[u8], gzip_content: &mut Vec<u8>) -> Result<(), std::io::Error> {
+    pub fn compress_content(&self, content: &[u8], gzip_content: &mut Vec<u8>) -> Result<(), std::io::Error> {
         let mut encoder = GzEncoder::new(gzip_content, Compression::default());
         encoder.write_all(content)?;
         encoder.finish()?;

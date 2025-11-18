@@ -1,4 +1,8 @@
-use crate::{configuration::{load_configuration::get_configuration, request_handler::RequestHandler, site::Site}, external_request_handlers::php_handler::PHPHandler, grux_http::http_util::empty_response_with_status};
+use crate::{
+    configuration::{load_configuration::get_configuration, request_handler::RequestHandler, site::Site},
+    external_request_handlers::php_handler::PHPHandler,
+    grux_http::http_util::empty_response_with_status,
+};
 use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::Bytes;
@@ -108,6 +112,36 @@ impl ExternalRequestHandlers {
         ExternalRequestHandlers { php, id_to_type }
     }
 
+    // Check if handler is relevant for a request
+    pub fn is_handler_relevant(&self, handler_id: &str, full_file_path: &String) -> bool {
+        let handlers = get_request_handlers();
+
+        // Get the handler type of the id, then call the appropriate handler
+        let handler_type = match handlers.id_to_type.get(handler_id) {
+            Some(handler_type) => handler_type,
+            None => return false,
+        };
+
+        // For each type, we fetch the handler and call its handle_request method
+        match handler_type.as_str() {
+            "php" => {
+                if let Some(php_handler) = self.php.get(handler_id) {
+                    for file_match in php_handler.get_file_matches() {
+                        if full_file_path.ends_with(&file_match) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                error!("Unknown handler type: {}", handler_type);
+            }
+        }
+
+        false
+    }
+
+    // Handle an external request
     pub async fn handle_external_request(
         &self,
         handler_id: &str,

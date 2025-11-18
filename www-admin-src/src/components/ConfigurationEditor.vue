@@ -639,6 +639,7 @@ onMounted(() => {
                                 <h4 class="site-hostname-title">{{ site.hostnames.join(' - ') || 'No hostnames' }}</h4>
                                 <span v-if="site.is_default" class="default-badge">DEFAULT</span>
                                 <span v-if="!site.is_enabled" class="admin-badge">DISABLED</span>
+                                <span v-if="getSiteBindings(site.id).some(bindingId => config.bindings?.find(b => b.id === bindingId)?.is_admin)" class="admin-badge">ADMIN PORTAL</span>
                             </div>
                             <button @click.stop="removeSite(siteIndex)" class="remove-button compact" :disabled="config.sites.length === 1">Remove</button>
                         </div>
@@ -687,7 +688,7 @@ onMounted(() => {
 
                             <div class="form-grid compact">
                                 <div v-if="site.access_log_enabled" class="form-field">
-                                    <label>Access Log Path</label>
+                                    <label>Access Log File</label>
                                     <input v-model="site.access_log_path" type="text" placeholder="Path to log file" />
                                 </div>
                             </div>

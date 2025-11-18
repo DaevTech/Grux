@@ -133,7 +133,7 @@ impl Configuration {
             hostnames: vec!["gruxsite".to_string()],
             is_default: false,
             is_enabled: true,
-            web_root: "D:/dev/test-sites/grux-wp-site1".to_string(),
+            web_root: "D:/dev/grux-website".to_string(),
             web_root_index_file_list: vec!["index.php".to_string()],
             enabled_handlers: vec!["1".to_string()], // For testing
             tls_cert_path: "".to_string(),
@@ -142,7 +142,7 @@ impl Configuration {
             tls_key_content: "".to_string(),
             rewrite_functions: vec!["OnlyWebRootIndexForSubdirs".to_string()],
             access_log_enabled: false,
-            access_log_path: "".to_string(),
+            access_log_path: "./logs/gruxsite-access-log.log".to_string(),
         };
         configuration.sites.push(test_wp_site);
         configuration.binding_sites.push(BindingSiteRelationship { binding_id: 2, site_id: 3 });
@@ -169,8 +169,10 @@ impl Configuration {
         // Enable file cache
         configuration.core.file_cache.is_enabled = true;
 
+        // Enable PHP, using Windows
         configuration.request_handlers[0].executable = "D:/dev/php/8.4.13nts/php-cgi.exe".to_string();
         configuration.request_handlers[0].ip_and_port = "".to_string();
+        configuration.request_handlers[0].other_webroot = "".to_string();
     }
 
     pub fn get_default() -> Self {

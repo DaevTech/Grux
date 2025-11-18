@@ -270,6 +270,11 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
     let external_request_handlers = external_request_handlers::get_request_handlers();
 
     for handler_id in &site.enabled_handlers {
+        // Check if handler is relevant for this request, primarily based on file matches
+        if !external_request_handlers.is_handler_relevant(handler_id, &file_path) {
+            continue;
+        }
+
         let handler_response_result = external_request_handlers
             .handle_external_request(handler_id, &method, &uri, &headers, &body_bytes, &site, &file_path, &remote_ip, &http_version)
             .await;
@@ -308,8 +313,65 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
     let mut additional_headers: Vec<(&str, &str)> = vec![];
     let mut response;
     if handler_did_stuff {
-        response = handler_response;
         // We do not set a default Content-Type here, as the handler should do that
+        response = handler_response;
+
+        // Consider gzipping content if not already gzipped
+        let content_type_header = response.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("");
+        let content_length = response.size_hint().upper().unwrap_or(0);
+        let file_cache = get_file_cache();
+        if file_cache.should_compress(content_type_header, content_length) {
+            // Gzip the body
+            // First, preserve the original headers and status
+            let original_headers = response.headers().clone();
+            let original_status = response.status();
+
+            // Collect the body data
+            let body_bytes = match response.collect().await {
+                Ok(collected) => collected.to_bytes().to_vec(),
+                Err(_) => {
+                    debug!("Failed to collect response body for compression");
+                    Vec::new()
+                }
+            };
+
+            if !body_bytes.is_empty() {
+                // Compress the content
+                let mut gzip_content = Vec::new();
+                if file_cache.compress_content(&body_bytes, &mut gzip_content).is_ok() {
+                    // Create new response with compressed content
+                    response = Response::new(full(gzip_content));
+                    *response.status_mut() = original_status;
+
+                    // Copy over the original headers (except Content-Length which will be wrong)
+                    for (key, value) in original_headers.iter() {
+                        if key != "content-length" {
+                            response.headers_mut().insert(key, value.clone());
+                        }
+                    }
+                    response.headers_mut().insert("Content-Encoding", HeaderValue::from_static("gzip"));
+                } else {
+                    // If compression failed, recreate response with original body
+                    response = Response::new(full(body_bytes));
+                    *response.status_mut() = original_status;
+
+                    // Copy over the original headers
+                    for (key, value) in original_headers.iter() {
+                        response.headers_mut().insert(key, value.clone());
+                    }
+                }
+            } else {
+                // If body is empty, recreate response to avoid moved value issues
+                response = Response::new(full(""));
+                *response.status_mut() = original_status;
+
+                // Copy over the original headers
+                for (key, value) in original_headers.iter() {
+                    response.headers_mut().insert(key, value.clone());
+                }
+            }
+        }
+
     } else {
         additional_headers.push(("Content-Type", &file_data.mime_type));
 
@@ -324,6 +386,9 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
         response = Response::new(full(body_content));
         *response.status_mut() = hyper::StatusCode::OK;
     }
+
+    // Gzip handling
+
 
     // If method is OPTIONS, we add the Allow header if not already present
     if method == hyper::Method::OPTIONS {
