@@ -77,7 +77,6 @@ fn test_absolute_linux_path() {
 }
 
 #[test]
-#[cfg(not(windows))]
 fn test_split_path_unix_path() {
     let (dir, file) = split_path("/path1/path2", "/path1/path2/index.php");
     assert_eq!(dir, "/path1/path2");
@@ -85,15 +84,8 @@ fn test_split_path_unix_path() {
 }
 
 #[test]
-fn test_split_path_windows_path() {
-    let (dir, file) = split_path(r"", r"C:\path1\path2\index.php");
-    assert_eq!(dir, "C:/path1/path2");
-    assert_eq!(file, "index.php");
-}
-
-#[test]
-fn test_split_path_root_file() {
-    let (dir, file) = split_path(r"", r"C:\file.txt");
-    assert_eq!(dir, "C:/");
-    assert_eq!(file, "file.txt");
+fn test_split_path_multiple_paths_file() {
+    let (dir, file) = split_path("C:/test/test2/test3", "C:/test/test2/test3/test4/test5/file.txt");
+    assert_eq!(dir, "C:/test/test2/test3");
+    assert_eq!(file, "test4/test5/file.txt");
 }

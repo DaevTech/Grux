@@ -58,28 +58,19 @@ pub fn get_full_file_path(input_path: &String) -> Result<String, std::io::Error>
 }
 
 /// Splits `path_str` into (relative_dir, file_name) based on `base_path`.
-/// - If `path_str` starts with `base_path`, returns the relative directory (with forward slashes, no leading slash) and file name.
-/// - If not, returns ("", file_name).
+/// - If `path_str` starts with `base_path`, returns (base_path, remaining_path).
+/// - If not, returns ("", path_str).
 pub fn split_path(base_path: &str, path_str: &str) -> (String, String) {
-    let base = Path::new(base_path).components().collect::<PathBuf>();
-    let path = Path::new(path_str);
+    let base_path_cleaned = base_path.replace('\\', "/").trim_end_matches('/').to_string();
+    let path_str_cleaned = path_str.replace('\\', "/");
 
-    // If path_str starts with base_path, strip base_path prefix
-    let rel = match path.strip_prefix(&base) {
-        Ok(rel) => rel,
-        Err(_) => path,
-    };
-
-    let file = rel.file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .replace('\\', "/");
-
-    let dir = rel.parent()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|| "".to_string());
-
-    (dir.trim_start_matches('/').to_string(), file)
+    if path_str_cleaned.starts_with(&base_path_cleaned) {
+        let remaining = &path_str_cleaned[base_path_cleaned.len()..];
+        let remaining = remaining.trim_start_matches('/'); // Remove leading slash if present
+        (base_path_cleaned, remaining.to_string())
+    } else {
+        ("".to_string(), path_str_cleaned)
+    }
 }
 
 // We expect all web roots to be cleaned, with forward slashes and absolute paths and should be able to handle replacing webroot from Windows to Unix style paths and vice versa

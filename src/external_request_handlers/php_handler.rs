@@ -636,7 +636,6 @@ impl PHPHandler {
 
         // Parse the URI to get script name and query string
         let uri_parts: Vec<&str> = uri.splitn(2, '?').collect();
-        let script_name = uri_parts[0];
         let query_string = if uri_parts.len() > 1 { uri_parts[1] } else { "" };
 
         // Handle web root mapping
@@ -653,7 +652,7 @@ impl PHPHandler {
             full_script_path = replace_web_root_in_path(&full_script_path, &full_local_web_root, &self.other_webroot);
             script_web_root = self.other_webroot.clone();
         }
-
+        println!("Called with: {} {}", &script_web_root, &full_script_path);
         let (directory, filename) = split_path(&script_web_root, &full_script_path);
         trace!("PHP FastCGI - Directory: {}, Filename: {}", directory, filename);
 
@@ -672,7 +671,7 @@ impl PHPHandler {
         let mut params: Vec<(String, String)> = Vec::new();
         params.push(("REQUEST_METHOD".to_string(), method.clone()));
         params.push(("REQUEST_URI".to_string(), uri.clone()));
-        params.push(("SCRIPT_NAME".to_string(), script_name.to_string()));
+        params.push(("SCRIPT_NAME".to_string(), directory.to_string()));
         params.push(("SCRIPT_FILENAME".to_string(), full_script_path.clone()));
         params.push(("DOCUMENT_ROOT".to_string(), script_web_root.clone()));
         params.push(("QUERY_STRING".to_string(), query_string.to_string()));
@@ -706,7 +705,7 @@ impl PHPHandler {
         }
 
         // Send FastCGI request
-        trace!("Sending FastCGI request...");
+        trace!("Sending FastCGI request... with parameters: {:?}", params);
         let start_time = Instant::now();
 
         // Send BEGIN_REQUEST
