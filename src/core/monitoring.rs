@@ -3,7 +3,7 @@ use std::sync::{
     OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
-use crate::{configuration::load_configuration::get_configuration, grux_core::async_runtime_handlers::get_async_runtime_handlers, grux_file_cache::get_file_cache};
+use crate::{configuration::load_configuration::get_configuration, core::async_runtime_handlers::get_async_runtime_handlers, grux_file_cache::get_file_cache};
 
 pub struct MonitoringState {
     requests_served: AtomicUsize,

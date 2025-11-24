@@ -1,4 +1,4 @@
-use crate::grux_core::monitoring::get_monitoring_state;
+use crate::core::monitoring::get_monitoring_state;
 use crate::logging::access_logging::get_access_log_buffer;
 
 pub fn start_background_tasks() {

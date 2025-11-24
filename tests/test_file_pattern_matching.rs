@@ -1,4 +1,4 @@
-use grux::grux_http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
+use grux::http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
 
 #[test]
 fn test_blocked_file_pattern_matching() {

@@ -2,9 +2,9 @@ use crate::configuration::configuration::Configuration;
 use crate::configuration::load_configuration::{handle_relationship_binding_sites, load_configuration};
 use crate::configuration::save_configuration::save_configuration;
 use crate::configuration::site::Site;
-use crate::grux_core::admin_user::{LoginRequest, authenticate_user, create_session, invalidate_session, verify_session_token};
-use crate::grux_core::monitoring::get_monitoring_state;
-use crate::grux_http::http_util::full;
+use crate::core::admin_user::{LoginRequest, authenticate_user, create_session, invalidate_session, verify_session_token};
+use crate::core::monitoring::get_monitoring_state;
+use crate::http::http_util::full;
 use http_body_util::BodyExt;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
@@ -16,13 +16,13 @@ use std::path::Path;
 
 pub fn initialize_admin_site() {
     // Check if there is at least one admin user
-    let connection_result = crate::grux_core::database_connection::get_database_connection();
+    let connection_result = crate::core::database_connection::get_database_connection();
     if connection_result.is_err() {
         error!("Failed to get database connection: {}", connection_result.err().unwrap());
         return;
     }
     let connection = connection_result.unwrap();
-    crate::grux_core::admin_user::create_default_admin_user(&connection).unwrap_or_else(|e| {
+    crate::core::admin_user::create_default_admin_user(&connection).unwrap_or_else(|e| {
         error!("Failed to create default admin user: {}", e);
     });
 }
@@ -300,12 +300,12 @@ async fn get_session_token_from_request(req: &Request<hyper::body::Incoming>) ->
 }
 
 // Helper function to verify session token and return session info
-pub fn verify_session(token: &str) -> Result<Option<crate::grux_core::admin_user::Session>, String> {
+pub fn verify_session(token: &str) -> Result<Option<crate::core::admin_user::Session>, String> {
     verify_session_token(token)
 }
 
 // Middleware-like function to check if request is authenticated
-pub async fn require_authentication(req: &Request<hyper::body::Incoming>) -> Result<Option<crate::grux_core::admin_user::Session>, Response<BoxBody<Bytes, hyper::Error>>> {
+pub async fn require_authentication(req: &Request<hyper::body::Incoming>) -> Result<Option<crate::core::admin_user::Session>, Response<BoxBody<Bytes, hyper::Error>>> {
     let token = get_session_token_from_request(req).await;
 
     if let Some(token) = token {

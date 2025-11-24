@@ -1,4 +1,4 @@
-use crate::grux_core::database_connection::get_database_connection;
+use crate::core::database_connection::get_database_connection;
 
 pub const CURRENT_DB_SCHEMA_VERSION: i32 = 1;
 

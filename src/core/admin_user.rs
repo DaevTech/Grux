@@ -5,7 +5,7 @@ use sqlite::Connection;
 use uuid::Uuid;
 use random_password_generator::generate_password;
 
-use crate::grux_core::database_connection::get_database_connection;
+use crate::core::database_connection::get_database_connection;
 
 
 #[derive(Debug, Serialize, Deserialize)]

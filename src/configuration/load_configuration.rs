@@ -1,8 +1,8 @@
 use crate::configuration::binding_site_relation::BindingSiteRelationship;
-use crate::grux_core::operation_mode::{OperationMode, get_operation_mode};
+use crate::core::operation_mode::{OperationMode, get_operation_mode};
 use crate::{
     configuration::{binding::Binding, configuration::Configuration, core::Core, request_handler::RequestHandler, save_configuration::save_configuration, site::Site},
-    grux_core::database_connection::get_database_connection,
+    core::database_connection::get_database_connection,
 };
 use log::info;
 use sqlite::Connection;

@@ -4,7 +4,7 @@ use std::time::Duration;
 use cached::proc_macro::cached;
 use log::trace;
 
-use crate::grux_http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
+use crate::http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
 
 /// Sanitizes and resolves a file path into an absolute path.
 /// - Expands relative paths to absolute.

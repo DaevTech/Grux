@@ -4,7 +4,7 @@ use crate::configuration::core::Core;
 use crate::configuration::load_configuration::load_configuration;
 use crate::configuration::request_handler::RequestHandler;
 use crate::configuration::site::Site;
-use crate::grux_core::database_connection::get_database_connection;
+use crate::core::database_connection::get_database_connection;
 use log::info;
 use log::trace;
 use serde_json;

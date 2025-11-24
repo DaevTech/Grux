@@ -1,7 +1,7 @@
 use crate::{
     configuration::{load_configuration::get_configuration, request_handler::RequestHandler, site::Site},
     external_request_handlers::php_handler::PHPHandler,
-    grux_http::http_util::empty_response_with_status,
+    http::http_util::empty_response_with_status,
 };
 use http_body_util::combinators::BoxBody;
 use hyper::Response;

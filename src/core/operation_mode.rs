@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 use clap::Parser;
 
-use crate::grux_core::command_line_args::CommandLineArgs;
+use crate::core::command_line_args::CommandLineArgs;
 
 // Operation mode
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1,11 +1,11 @@
 use grux::configuration::load_configuration::check_configuration;
 use grux::external_request_handlers::external_request_handlers;
-use grux::grux_admin::http_admin_api::initialize_admin_site;
-use grux::grux_core::async_runtime_handlers;
-use grux::grux_core::async_runtime_handlers::AsyncRuntimeHandlers;
-use grux::grux_core::background_tasks::start_background_tasks;
-use grux::grux_core::database_schema;
-use grux::grux_core::operation_mode::get_operation_mode;
+use grux::admin_portal::http_admin_api::initialize_admin_site;
+use grux::core::async_runtime_handlers;
+use grux::core::async_runtime_handlers::AsyncRuntimeHandlers;
+use grux::core::background_tasks::start_background_tasks;
+use grux::core::database_schema;
+use grux::core::operation_mode::get_operation_mode;
 use grux::grux_http_server;
 use grux::grux_log;
 use log::{error, info};

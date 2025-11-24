@@ -11,13 +11,13 @@ Grux is a Rust-based, async web server and admin platform with modular request h
   - `src/configuration/configuration.rs` — Main configuration struct
   - `src/configuration/core.rs`, `binding.rs`, `site.rs`, `request_handler.rs`, etc. — Configuration sub-structures
   - Config is loaded from the `grux_config` table in SQLite. If missing, a default is generated and persisted.
-- **HTTP Server:** `src/grux_http_server.rs` starts async servers (using `tokio`/`hyper`) for each configured binding. Admin endpoints are always served over TLS via `src/grux_http/http_tls.rs`.
+- **HTTP Server:** `src/grux_http_server.rs` starts async servers (using `tokio`/`hyper`) for each configured binding. Admin endpoints are always served over TLS via `src/http/http_tls.rs`.
 - **Request Handling:**
-  - `src/grux_http/handle_request.rs` routes requests to static file serving, admin endpoints, or external handlers (e.g., PHP).
+  - `src/http/handle_request.rs` routes requests to static file serving, admin endpoints, or external handlers (e.g., PHP).
   - `src/external_request_handlers/` contains modular handlers (notably `php_handler.rs` for PHP-CGI via persistent processes).
-  - `src/grux_http/file_pattern_matching.rs` handles URL pattern matching for routing.
-- **Admin Portal:** Served from `www-admin/` and handled in `src/grux_admin/http_admin_api.rs`. Supports login/logout, config management, and session handling. Source code in `www-admin-src/` (Vite/Vue project).
-- **Core Services:** `src/grux_core/` contains essential services:
+  - `src/http/file_pattern_matching.rs` handles URL pattern matching for routing.
+- **Admin Portal:** Served from `www-admin/` and handled in `src/admin_portal/http_admin_api.rs`. Supports login/logout, config management, and session handling. Source code in `www-admin-src/` (Vite/Vue project).
+- **Core Services:** `src/core/` contains essential services:
   - `database_connection.rs`, `database_schema.rs` — Database management
   - `admin_user.rs` — User authentication
   - `background_tasks.rs` — Async background operations
@@ -72,7 +72,7 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 - `server_settings.rs` — Server-wide settings
 - `binding_site_relation.rs` — Binding-to-site mappings
 
-### HTTP Handling (`src/grux_http/`)
+### HTTP Handling (`src/http/`)
 - `handle_request.rs` — Main request routing logic
 - `http_tls.rs` — TLS/SSL configuration and handling
 - `http_util.rs` — HTTP utilities
@@ -82,10 +82,10 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 - `external_request_handlers.rs` — Handler trait and registry
 - `php_handler.rs` — PHP-CGI integration (persistent processes)
 
-### Admin Portal (`src/grux_admin/`)
+### Admin Portal (`src/admin_portal/`)
 - `http_admin_api.rs` — Admin API endpoints
 
-### Core Services (`src/grux_core/`)
+### Core Services (`src/core/`)
 - `database_connection.rs` — SQLite connection management
 - `database_schema.rs` — Database schema definitions
 - `admin_user.rs` — User authentication and management
@@ -119,7 +119,7 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 
 ## Examples
 - To add a new request handler, implement the trait in `src/external_request_handlers/external_request_handlers.rs` and register it in startup (`src/main.rs`).
-- To change admin portal behavior, update `src/grux_admin/http_admin_api.rs` and the UI in `www-admin-src/src/`.
+- To change admin portal behavior, update `src/admin_portal/http_admin_api.rs` and the UI in `www-admin-src/src/`.
 - To adjust file cache, modify config in DB and logic in `src/grux_file_cache.rs`.
 - To add new configuration options, update structs in `src/configuration/` and corresponding admin UI components.
 - To modify logging behavior, update `src/logging/` modules and configuration in `src/grux_log.rs`.
