@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
-use clap::Parser;
 
-use crate::core::command_line_args::CommandLineArgs;
+use crate::core::command_line_args::get_command_line_args;
 
 // Operation mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,7 +17,7 @@ pub static GRUX_OPERATION_MODE: OperationMode = OperationMode::PRODUCTION;
 
 pub fn load_operation_mode() -> OperationMode {
      // Parse command line args
-    let cli = CommandLineArgs::parse();
+    let cli = get_command_line_args();
 
     cli.opmode.map(|s| match s.as_str() {
         "DEV" => OperationMode::DEV,

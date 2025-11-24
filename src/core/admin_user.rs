@@ -1,12 +1,11 @@
-use log::{info};
-use chrono::{DateTime, Utc, Duration};
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Duration, Utc};
+use log::info;
+use random_password_generator::generate_password;
+use serde::{Deserialize, Serialize};
 use sqlite::Connection;
 use uuid::Uuid;
-use random_password_generator::generate_password;
 
 use crate::core::database_connection::get_database_connection;
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -48,12 +47,21 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
         _ => false,
     };
 
-    if !admin_exists {
-        let random_password = generate_password(true, true, false, 10);
+    let mut need_to_clear_sessions = false;
 
-        // Create default admin user with generated password
-        let password_hash = bcrypt::hash(&random_password, bcrypt::DEFAULT_COST)
-            .map_err(|e| format!("Failed to hash default password: {}", e))?;
+    // Reset admin password if requested via command line
+    let cli = crate::core::command_line_args::get_command_line_args();
+    if admin_exists && cli.reset_admin_password {
+        let (random_password, password_hash) = get_random_hashed_password();
+        connection
+            .execute(format!("UPDATE users SET password_hash = '{}' WHERE username = 'admin'", password_hash))
+            .map_err(|e| format!("Failed to reset admin password: {}", e))?;
+        info!("Admin password reset to: '{}'", random_password);
+        need_to_clear_sessions = true;
+    }
+
+    if !admin_exists {
+        let (random_password, password_hash) = get_random_hashed_password();
 
         let created_at = Utc::now().to_rfc3339();
 
@@ -65,9 +73,24 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
             .map_err(|e| format!("Failed to create default admin user: {}", e))?;
 
         info!("Default admin user created with username 'admin' and password '{}'", random_password);
+        need_to_clear_sessions = true;
+    }
+
+    if need_to_clear_sessions {
+        // Invalidate all existing sessions for admin user
+        connection
+            .execute("DELETE FROM sessions WHERE username = 'admin'".to_string())
+            .map_err(|e| format!("Failed to invalidate admin sessions: {}", e))?;
+        info!("All existing admin sessions have been invalidated.");
     }
 
     Ok(())
+}
+
+fn get_random_hashed_password() -> (String, String) {
+    let random_password = generate_password(true, true, false, 20);
+    let password_hash = bcrypt::hash(&random_password, bcrypt::DEFAULT_COST).expect("Failed to hash password");
+    (random_password, password_hash)
 }
 
 pub fn authenticate_user(username: &str, password: &str) -> Result<Option<User>, String> {
@@ -90,8 +113,7 @@ pub fn authenticate_user(username: &str, password: &str) -> Result<Option<User>,
             let is_active = is_active != 0;
 
             // Verify password
-            let password_valid = bcrypt::verify(password, &password_hash)
-                .map_err(|e| format!("Failed to verify password: {}", e))?;
+            let password_valid = bcrypt::verify(password, &password_hash).map_err(|e| format!("Failed to verify password: {}", e))?;
 
             if password_valid {
                 let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -99,11 +121,7 @@ pub fn authenticate_user(username: &str, password: &str) -> Result<Option<User>,
                     .with_timezone(&Utc);
 
                 let last_login = match last_login_str {
-                    Some(login_str) => Some(
-                        DateTime::parse_from_rfc3339(&login_str)
-                            .map_err(|e| format!("Failed to parse last_login: {}", e))?
-                            .with_timezone(&Utc)
-                    ),
+                    Some(login_str) => Some(DateTime::parse_from_rfc3339(&login_str).map_err(|e| format!("Failed to parse last_login: {}", e))?.with_timezone(&Utc)),
                     None => None,
                 };
 
