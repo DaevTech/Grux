@@ -79,6 +79,54 @@ const loadConfiguration = async () => {
     }
 };
 
+// Configuration reload state
+const isReloading = ref(false);
+const showReloadModal = ref(false);
+const reloadError = ref('');
+
+// Reload configuration (server restart)
+const showReloadConfirmation = () => {
+    showReloadModal.value = true;
+};
+
+const hideReloadConfirmation = () => {
+    showReloadModal.value = false;
+};
+
+const confirmReloadConfiguration = async () => {
+    isReloading.value = true;
+    reloadError.value = '';
+    showReloadModal.value = false;
+
+    try {
+        const response = await fetch('/configuration/reload', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${props.user.sessionToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (response.ok) {
+            successMessage.value = 'Configuration reload initiated. The server is restarting...';
+            // Optionally reload the page after a short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } else {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            reloadError.value = errorData.error || 'Failed to reload configuration';
+            showReloadModal.value = true; // Show modal again to display error
+        }
+    } catch (err) {
+        console.error('Config reload error:', err);
+        reloadError.value = 'Network error while reloading configuration';
+        showReloadModal.value = true; // Show modal again to display error
+    } finally {
+        isReloading.value = false;
+    }
+};
+
 // Save configuration
 const saveConfiguration = async () => {
     isSaving.value = true;
@@ -502,6 +550,11 @@ onMounted(() => {
                     <span v-else>Save Configuration</span>
                 </button>
                 <button v-if="hasUnsavedChanges" @click="resetChanges" class="reset-button" :disabled="isSaving">Reset Changes</button>
+                <button @click="showReloadConfirmation" class="reload-button" :disabled="isReloading || isSaving">
+                    <span v-if="isReloading">Reloading...</span>
+                    <span v-else>Reload Configuration</span>
+                </button>
+
                 <button v-if="!inline" @click="emit('close')" class="close-button">Close</button>
             </div>
         </div>
@@ -552,6 +605,11 @@ onMounted(() => {
                         <span v-else>Save Configuration</span>
                     </button>
                     <button v-if="hasUnsavedChanges" @click="resetChanges" class="reset-button top" :disabled="isSaving">Reset Changes</button>
+                    <button @click="showReloadConfirmation" class="reload-button top" :disabled="isReloading || isSaving">
+                        <span v-if="isReloading">Reloading...</span>
+                        <span v-else>Reload Config</span>
+                    </button>
+
 
                     <!-- Unsaved changes indicator -->
                     <div v-if="hasUnsavedChanges" class="changes-indicator-top">You have unsaved changes</div>
@@ -1028,6 +1086,56 @@ onMounted(() => {
         <div v-else class="empty-state">
             <button @click="loadConfiguration" class="load-button">Load Configuration</button>
         </div>
+
+        <!-- Reload Configuration Modal -->
+        <div v-if="showReloadModal" class="modal-overlay" @click="hideReloadConfirmation">
+            <div class="modal-content" @click.stop>
+                <div class="modal-header">
+                    <h3>Reload Configuration</h3>
+                    <button @click="hideReloadConfirmation" class="modal-close-button">×</button>
+                </div>
+
+                <div class="modal-body">
+                    <div v-if="reloadError" class="modal-error">
+                        <div class="error-icon">❌</div>
+                        <div>
+                            <strong>Reload Failed</strong>
+                            <p>{{ reloadError }}</p>
+                        </div>
+                    </div>
+
+                    <div v-else class="modal-warning">
+                        <div class="warning-icon">⚠️</div>
+                        <div>
+                            <strong>Are you sure you want to reload the configuration?</strong>
+                            <p>This action will:</p>
+                            <ul>
+                                <li>Restart the server with the current saved configuration</li>
+                                <li>Disconnect all active connections</li>
+                            </ul>
+                            <p class="warning-note">Make sure you have saved your configuration changes before reloading!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <div v-if="reloadError" class="modal-actions-error">
+                        <button @click="hideReloadConfirmation" class="modal-button secondary">Close</button>
+                        <button @click="() => { reloadError = ''; confirmReloadConfiguration(); }" class="modal-button danger" :disabled="isReloading">
+                            <span v-if="isReloading">Reloading...</span>
+                            <span v-else>Try Again</span>
+                        </button>
+                    </div>
+                    <div v-else class="modal-actions">
+                        <button @click="hideReloadConfirmation" class="modal-button secondary">Cancel</button>
+                        <button @click="confirmReloadConfiguration" class="modal-button danger" :disabled="isReloading">
+                            <span v-if="isReloading">Reloading...</span>
+                            <span v-else>Reload Configuration</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -1296,6 +1404,41 @@ onMounted(() => {
 .reset-button:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 8px rgba(245, 158, 11, 0.3);
+}
+
+.reload-button {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(139, 92, 246, 0.2);
+}
+
+.reload-button.top {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    box-shadow: 0 1px 3px rgba(139, 92, 246, 0.2);
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+}
+
+.reload-button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.reload-button:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(139, 92, 246, 0.3);
+}
+
+.reload-button.top:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
 }
 
 .close-button {
@@ -2544,5 +2687,233 @@ onMounted(() => {
 
 .help-icon.success {
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: modalFadeIn 0.2s ease;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    border: 1px solid #e5e7eb;
+    animation: modalSlideIn 0.3s ease;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);
+    border-radius: 12px 12px 0 0;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #92400e;
+    font-size: 1.25rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.modal-close-button {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-close-button:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #374151;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-warning {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.modal-error {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.warning-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+    margin-top: 0.25rem;
+}
+
+.error-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+    margin-top: 0.25rem;
+}
+
+.modal-warning strong,
+.modal-error strong {
+    color: #1f2937;
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+.modal-warning p,
+.modal-error p {
+    color: #4b5563;
+    margin: 0.5rem 0;
+    line-height: 1.5;
+}
+
+.modal-warning ul {
+    color: #4b5563;
+    margin: 0.5rem 0;
+    padding-left: 1.25rem;
+    line-height: 1.6;
+}
+
+.modal-warning li {
+    margin-bottom: 0.25rem;
+}
+
+.warning-note {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-top: 1rem;
+    color: #92400e !important;
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.modal-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid #f1f5f9;
+    background: #f8fafc;
+    border-radius: 0 0 12px 12px;
+}
+
+.modal-actions,
+.modal-actions-error {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+.modal-button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+}
+
+.modal-button.secondary {
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #d1d5db;
+}
+
+.modal-button.secondary:hover {
+    background: #e5e7eb;
+    transform: translateY(-1px);
+}
+
+.modal-button.danger {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+}
+
+.modal-button.danger:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.modal-button:disabled {
+    background: #9ca3af;
+    color: #6b7280;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.modal-button:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@media (max-width: 768px) {
+    .modal-content {
+        width: 95%;
+        margin: 1rem;
+    }
+
+    .modal-actions,
+    .modal-actions-error {
+        flex-direction: column;
+    }
+
+    .modal-button {
+        width: 100%;
+    }
 }
 </style>

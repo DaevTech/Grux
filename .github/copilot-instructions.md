@@ -23,7 +23,7 @@ Grux is a Rust-based, async web server and admin platform with modular request h
   - `background_tasks.rs` — Async background operations
   - `monitoring.rs` — System monitoring
   - `operation_mode.rs`, `command_line_args.rs` — Runtime configuration
-- **File Cache:** `src/grux_file_cache.rs` implements an in-memory cache for static files, configurable via `src/configuration/file_cache.rs`.
+- **File Cache:** `src/file/file_cache.rs` implements an in-memory cache for static files, configurable via `src/configuration/file_cache.rs`.
 - **Logging:** `src/logging/` module handles logging:
   - `access_logging.rs` — HTTP access logs
   - `buffered_log.rs` — Performance-optimized logging
@@ -55,8 +55,8 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 - `src/lib.rs` — Library root
 - `src/http/http_server.rs` — Server startup, binding logic
 - `src/grux_log.rs` — Logging initialization
-- `src/grux_file_cache.rs` — Static file cache implementation
-- `src/grux_file_util.rs` — File system utilities
+- `src/file/file_cache.rs` — Static file cache implementation
+- `src/file/file_util.rs` — File system utilities
 - `src/grux_port_manager.rs` — Port allocation management
 
 ### Configuration (`src/configuration/`)
@@ -93,7 +93,6 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 - `monitoring.rs` — System monitoring
 - `operation_mode.rs` — Runtime mode configuration
 - `command_line_args.rs` — CLI argument parsing
-- `async_runtime_handlers.rs` — Async runtime utilities
 
 ### Logging (`src/logging/`)
 - `access_logging.rs` — HTTP access logs
@@ -120,7 +119,7 @@ Grux is a Rust-based, async web server and admin platform with modular request h
 ## Examples
 - To add a new request handler, implement the trait in `src/external_request_handlers/external_request_handlers.rs` and register it in startup (`src/main.rs`).
 - To change admin portal behavior, update `src/admin_portal/http_admin_api.rs` and the UI in `www-admin-src/src/`.
-- To adjust file cache, modify config in DB and logic in `src/grux_file_cache.rs`.
+- To adjust file cache, modify config in DB and logic in `src/file/file_cache.rs`.
 - To add new configuration options, update structs in `src/configuration/` and corresponding admin UI components.
 - To modify logging behavior, update `src/logging/` modules and configuration in `src/grux_log.rs`.
 

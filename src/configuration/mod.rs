@@ -9,3 +9,4 @@ pub mod server_settings;
 pub mod core;
 pub mod load_configuration;
 pub mod save_configuration;
+pub mod cached_configuration;

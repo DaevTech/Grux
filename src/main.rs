@@ -1,16 +1,15 @@
-use grux::admin_portal::http_admin_api::initialize_admin_site;
-use grux::core::async_runtime_handlers;
-use grux::core::async_runtime_handlers::AsyncRuntimeHandlers;
-use grux::core::background_tasks::start_background_tasks;
+use grux::configuration::cached_configuration::get_cached_configuration;
 use grux::core::database_schema;
 use grux::core::operation_mode::get_operation_mode;
-use grux::external_request_handlers::external_request_handlers;
+use grux::core::running_state_manager::get_running_state_manager;
+use grux::core::triggers::get_trigger_handler;
 use grux::grux_log;
-use grux::http::http_server;
-use grux::{configuration::load_configuration::check_configuration, core::shutdown_manager::get_shutdown_manager};
+use grux::{admin_portal::init::initialize_admin_site, core::background_tasks::start_background_tasks};
 use log::{error, info};
+use tokio::select;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let logo = r#"
   ________
  /  _____/______ __ _____  ___
@@ -21,24 +20,43 @@ fn main() {
 "#;
     println!("{}", logo);
 
-    // Create the runtimes
-    let http_server_runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-    let grux_background_tasks_runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
-    // Store the runtimes in a global singleton for access later
-    async_runtime_handlers::set_async_runtime_handlers(AsyncRuntimeHandlers::new(http_server_runtime.handle().clone(), grux_background_tasks_runtime.handle().clone()));
-
     // Start the basics, logging etc.
     start_grux_basics();
 
-    // Start the background tasks
-    grux_background_tasks_runtime.block_on(async {
-        start_background_tasks_thread().await;
-    });
+    // Start the running state manager thread, which also listens for configuration changes
+    tokio::spawn(async {
+        // Start tasks that run in the background
+        start_background_tasks();
 
-    // Start the actual http server listening thread
-    http_server_runtime.block_on(async {
-        start_main_server_thread().await; // This never exits
-    });
+        // Start the running state, which are all the configuration dependent parts
+        let running_state_manager = get_running_state_manager();
+
+        let triggers = get_trigger_handler();
+
+        let shutdown_token_trigger = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger");
+        let shutdown_token = shutdown_token_trigger.read().await.clone();
+
+        loop {
+            let configuration_trigger = triggers.get_trigger("reload_configuration").expect("Failed to get reload_configuration trigger");
+            let configuration_token = configuration_trigger.read().await.clone();
+
+            select! {
+                _ = configuration_token.cancelled() => {
+                    info!("Reloading running state due to configuration change");
+                    running_state_manager.set_new_running_state().await;
+                }
+                _ = shutdown_token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    // Waiting a little while to allow graceful shutdown
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    std::process::exit(0);
 }
 
 fn start_grux_basics() {
@@ -54,11 +72,6 @@ fn start_grux_basics() {
         }
     }
 
-    // Starting Grux
-    let version = env!("CARGO_PKG_VERSION");
-    info!("Starting Grux {}...", version);
-    info!("Operation mode: {:?}", operation_mode);
-
     // Initialize database tables and migrations
     if let Err(e) = database_schema::initialize_database() {
         error!("Failed to initialize database: {}", e);
@@ -66,37 +79,23 @@ fn start_grux_basics() {
     }
     info!("Database initialized");
 
-    // Load configuration and check for errors
-    let configuration_check_result = check_configuration();
-    if let Err(e) = configuration_check_result {
-        error!("Failed to load configuration: {}", e);
-        std::process::exit(1);
+    // Load the configuration early to catch any errors
+    match grux::configuration::load_configuration::init() {
+        Ok(_) => {
+            // Load the cached configuration, so it is ready to go
+            get_cached_configuration();
+        }
+        Err(e) => {
+            error!("Failed to load configuration: {}", e);
+            std::process::exit(1);
+        }
     }
-    info!("Configuration loaded");
-}
 
-async fn start_main_server_thread() {
-    // Initialize admin site
+    // Starting Grux
+    let version = env!("CARGO_PKG_VERSION");
+    info!("Starting Grux {}...", version);
+    info!("Operation mode: {:?}", operation_mode);
+
+    // Initialize the admin site
     initialize_admin_site();
-
-    // Initialize any external handlers, such as PHP, if needed
-    external_request_handlers::get_request_handlers();
-    info!("External request handlers initialized");
-
-    // Init server bindings and start serving those bits
-    http_server::initialize_server();
-
-    // Wait for shutdown signal
-    let shutdown_manager = get_shutdown_manager();
-    let cancellation_token = shutdown_manager.get_cancellation_token();
-    cancellation_token.cancelled().await;
-
-    // Waiting a few seconds to allow graceful shutdown
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    std::process::exit(0);
-}
-
-async fn start_background_tasks_thread() {
-    // Load background tasks
-    start_background_tasks();
 }

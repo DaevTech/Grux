@@ -1,5 +1,6 @@
 use crate::{
-    configuration::{load_configuration::get_configuration, request_handler::RequestHandler, site::Site},
+    configuration::{request_handler::RequestHandler, site::Site},
+    core::running_state_manager::get_running_state_manager,
     external_request_handlers::php_handler::PHPHandler,
     http::http_util::empty_response_with_status,
 };
@@ -7,7 +8,7 @@ use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use hyper::body::Bytes;
 use log::{debug, error};
-use std::{collections::HashMap, sync::OnceLock};
+use std::collections::HashMap;
 
 pub struct ExternalRequestHandlers {
     pub id_to_type: HashMap<String, String>,
@@ -40,7 +41,8 @@ pub trait ExternalRequestHandler {
 impl ExternalRequestHandlers {
     pub fn new() -> Self {
         // Get the config, to determine what we need
-        let config = get_configuration();
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let config = cached_configuration.get_configuration();
 
         // Run through all the configured sites in configuration and determine which is actually referenced
         let mut handler_ids_used = HashMap::new();
@@ -113,8 +115,11 @@ impl ExternalRequestHandlers {
     }
 
     // Check if handler is relevant for a request
-    pub fn is_handler_relevant(&self, handler_id: &str, full_file_path: &String) -> bool {
-        let handlers = get_request_handlers();
+    pub async fn is_handler_relevant(&self, handler_id: &str, full_file_path: &String) -> bool {
+        let running_state_manager = get_running_state_manager();
+        let running_state = running_state_manager.get_running_state();
+        let unlocked_running_state = running_state.read().await;
+        let handlers = unlocked_running_state.get_external_request_handlers();
 
         // Get the handler type of the id, then call the appropriate handler
         let handler_type = match handlers.id_to_type.get(handler_id) {
@@ -154,7 +159,10 @@ impl ExternalRequestHandlers {
         remote_ip: &str,
         http_version: &String,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-        let handlers = get_request_handlers();
+        let running_state_manager = get_running_state_manager();
+        let running_state = running_state_manager.get_running_state();
+        let unlocked_running_state = running_state.read().await;
+        let handlers = unlocked_running_state.get_external_request_handlers();
 
         // Get the handler type of the id, then call the appropriate handler
         let handler_type = match handlers.id_to_type.get(handler_id) {
@@ -178,10 +186,4 @@ impl ExternalRequestHandlers {
             }
         }
     }
-}
-
-// Get the request handlers
-pub fn get_request_handlers() -> &'static ExternalRequestHandlers {
-    static HANDLERS: OnceLock<ExternalRequestHandlers> = OnceLock::new();
-    HANDLERS.get_or_init(|| ExternalRequestHandlers::new())
 }

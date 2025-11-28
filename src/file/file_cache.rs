@@ -1,6 +1,7 @@
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use log::{debug, trace, warn};
+use tokio::select;
 use std::io::Write;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -12,7 +13,8 @@ use std::{
 };
 use tokio::time::interval;
 
-use crate::configuration::load_configuration::get_configuration;
+use crate::configuration::cached_configuration::get_cached_configuration;
+use crate::core::triggers::get_trigger_handler;
 
 pub struct FileCache {
     is_enabled: bool,
@@ -41,7 +43,9 @@ impl FileCache {
     /// max_file_size: Maximum size of individual files to cache (in bytes)
     pub fn new() -> Self {
         // Get configuration
-        let config = get_configuration();
+        let cached_configuration = get_cached_configuration();
+        let config = cached_configuration.get_configuration();
+
         let file_data_config = &config.core.file_cache;
 
         let is_enabled = file_data_config.is_enabled;
@@ -151,13 +155,9 @@ impl FileCache {
             };
 
             if self.is_enabled && (length < self.max_file_size) {
-                trace!("New cached file/dir: path={}, is_directory={}, exists={}, length={}, is_too_large={}, mime_type={}",
-                    new_cached_file.file_path,
-                    new_cached_file.is_directory,
-                    new_cached_file.exists,
-                    new_cached_file.length,
-                    new_cached_file.is_too_large,
-                    new_cached_file.mime_type
+                trace!(
+                    "New cached file/dir: path={}, is_directory={}, exists={}, length={}, is_too_large={}, mime_type={}",
+                    new_cached_file.file_path, new_cached_file.is_directory, new_cached_file.exists, new_cached_file.length, new_cached_file.is_too_large, new_cached_file.mime_type
                 );
                 self.cache.write().unwrap().insert(file_path.to_string(), new_cached_file.clone());
                 self.cached_items_last_checked
@@ -174,7 +174,10 @@ impl FileCache {
     pub fn should_compress(&self, mime_type: &str, content_length: u64) -> bool {
         if self.gzip_enabled {
             let check_should_compress = content_length > 1000 && content_length < (10 * 1024 * 1024) && self.compressible_content_types.iter().any(|ct| mime_type.starts_with(ct));
-            trace!("Should compress check for MIME type {} and content_length: {} - Result: {}", mime_type, content_length, check_should_compress);
+            trace!(
+                "Should compress check for MIME type {} and content_length: {} - Result: {}",
+                mime_type, content_length, check_should_compress
+            );
             return check_should_compress;
         }
         false
@@ -191,11 +194,20 @@ impl FileCache {
         let mut interval = interval(Duration::from_secs(10));
 
         let max_item_lifetime_duration = Duration::from_secs(max_item_lifetime as u64);
-
         let lifetime_before_check_duration = Duration::from_secs(lifetime_before_check as u64);
 
+        let triggers = get_trigger_handler();
+        let configuration_trigger = triggers.get_trigger("reload_configuration").expect("Failed to get reload_configuration trigger");
+        let configuration_token = configuration_trigger.read().await.clone();
+
         loop {
-            interval.tick().await;
+            select! {
+                _ = configuration_token.cancelled() => {
+                    trace!("[FileCacheUpdate] Configuration reload trigger received, so stopping update thread");
+                    break;
+                }
+                _ = interval.tick() => {}
+            }
 
             let start_time = Instant::now();
 
@@ -289,16 +301,4 @@ impl FileCache {
         encoder.finish()?;
         Ok(())
     }
-}
-
-// Global file cache instance
-lazy_static::lazy_static! {
-    static ref GLOBAL_FILE_CACHE: FileCache = {
-        FileCache::new()
-    };
-}
-
-/// Get the global file cache instance
-pub fn get_file_cache() -> &'static FileCache {
-    &GLOBAL_FILE_CACHE
 }

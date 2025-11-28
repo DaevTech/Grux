@@ -8,10 +8,10 @@ use log::info;
 use sqlite::Connection;
 use sqlite::State;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+
 
 // Load the configuration from the database or create a default one if it doesn't exist
-fn init() -> Result<Configuration, String> {
+pub fn init() -> Result<Configuration, String> {
     let connection = get_database_connection()?;
 
     // Check if we need to load the default configuration
@@ -54,28 +54,15 @@ fn init() -> Result<Configuration, String> {
             configuration
         } else {
             // Load existing configuration
-            load_configuration()?
+            fetch_configuration_in_db()?
         }
     };
 
     Ok(configuration)
 }
 
-// Get the configuration
-pub fn get_configuration() -> &'static Configuration {
-    static CONFIG: OnceLock<Configuration> = OnceLock::new();
-    CONFIG.get_or_init(|| init().unwrap_or_else(|e| panic!("Failed to initialize configuration: {}", e)))
-}
-
-// Load the configuration and return any errors
-// Should be used in the main function to check configuration
-pub fn check_configuration() -> Result<Configuration, String> {
-    init()
-}
-
-/// Load the configuration from the normalized database tables
-/// Returns the data from db as fresh, use the singleton get_configuration() for cached access
-pub fn load_configuration() -> Result<Configuration, String> {
+// Load the configuration from the normalized database tables - Returns the data from db as fresh
+pub fn fetch_configuration_in_db() -> Result<Configuration, String> {
     let connection = get_database_connection()?;
 
     // Load all configuration components
@@ -329,5 +316,38 @@ fn parse_key_value_pairs(input: &str) -> Vec<(String, String)> {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+use std::fs;
+#[cfg(test)]
+use std::path::Path;
+
+#[test]
+fn test_load_configuration_with_existing_config() {
+    // Create copy of the database for testing
+    let copied_db_path = "./temp_test_data/grux_test_existing.db";
+    let original_db_path = "./db/grux.db";
+
+    if !Path::new("./temp_test_data").exists() {
+        fs::create_dir_all("./temp_test_data").unwrap();
+    }
+
+    if Path::new(copied_db_path).exists() {
+        fs::remove_file(copied_db_path).unwrap();
+    }
+
+    fs::copy(original_db_path, copied_db_path).unwrap();
+
+    let result = init();
+    assert!(result.is_ok());
+
+    assert!(fs::metadata(original_db_path).is_ok(), "Configuration database should exist");
+
+    // Copy back the original database
+    if Path::new(copied_db_path).exists() {
+        fs::remove_file(original_db_path).unwrap();
+        fs::rename(copied_db_path, original_db_path).unwrap();
     }
 }

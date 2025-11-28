@@ -1,8 +1,8 @@
 use crate::configuration::site::Site;
-use crate::core::shutdown_manager::get_shutdown_manager;
+use crate::core::triggers::get_trigger_handler;
 use crate::external_request_handlers::external_request_handlers::ExternalRequestHandler;
-use crate::grux_file_util::{get_full_file_path, replace_web_root_in_path, split_path};
-use crate::grux_port_manager::PortManager;
+use crate::file::file_util::{get_full_file_path, replace_web_root_in_path, split_path};
+use crate::grux_port_manager::{PortManager, get_port_manager};
 use crate::http::http_util::*;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
@@ -302,7 +302,7 @@ impl PHPHandler {
         extra_environment: Vec<(String, String)>,
     ) -> Self {
         // Get the singleton port manager instance
-        let port_manager = PortManager::instance();
+        let port_manager = get_port_manager();
 
         // Initialize single PHP-CGI process (only used on Windows)
         let php_process = Arc::new(Mutex::new(PhpCgiProcess::new(executable, port_manager.clone(), concurrent_threads.clone(), extra_environment)));
@@ -392,54 +392,51 @@ impl ExternalRequestHandler for PHPHandler {
             let process_clone = php_process.clone();
             let cached_port_clone = self.cached_port.clone();
 
-            // Try to get current runtime handle, if available spawn async task
-            // If not available, the async startup will happen on first request
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    let mut process_guard = process_clone.lock().await;
-                    if let Err(e) = process_guard.start().await {
-                        error!("Failed to start PHP-CGI process: {}", e);
-                        return;
-                    }
-                    // Cache the port after successful start to avoid future mutex contention
-                    if let Some(port) = process_guard.get_port() {
-                        cached_port_clone.store(port, Ordering::Relaxed);
-                        trace!("PHP-CGI process started successfully on port {}", port);
-                    } else {
-                        trace!("PHP-CGI process started successfully");
-                    }
-                });
-            } else {
-                // No runtime available, startup will happen lazily on first request
-                trace!("No Tokio runtime available during PHP handler start, will start PHP-CGI process on first request");
-            }
+            tokio::spawn(async move {
+                let mut process_guard = process_clone.lock().await;
+                if let Err(e) = process_guard.start().await {
+                    error!("Failed to start PHP-CGI process: {}", e);
+                    return;
+                }
+                // Cache the port after successful start to avoid future mutex contention
+                if let Some(port) = process_guard.get_port() {
+                    cached_port_clone.store(port, Ordering::Relaxed);
+                    trace!("PHP-CGI process started successfully on port {}", port);
+                } else {
+                    trace!("PHP-CGI process started successfully");
+                }
+            });
 
             // Start the keep-alive monitoring task
             let process_clone = php_process.clone();
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let shutdown_manager = get_shutdown_manager();
-                let cancellation_token = shutdown_manager.get_cancellation_token();
-                handle.spawn(async move {
-                    loop {
-                        select! {
-                            _ = cancellation_token.cancelled() => {
-                                trace!("Shutdown signal received, stopping PHP processes if running");
-                                let mut process_guard = process_clone.lock().await;
-                                process_guard.stop().await;
-                                break;
-                            }
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                                let mut process_guard = process_clone.lock().await;
-                                if let Err(e) = process_guard.ensure_running().await {
-                                    error!("Failed to ensure PHP-CGI process is running: {}", e);
-                                }
+            tokio::spawn(async move {
+                let triggers = get_trigger_handler();
+                let shutdown_token = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger").read().await.clone();
+                let stop_services_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
+
+                loop {
+                    select! {
+                        _ = shutdown_token.cancelled() => {
+                            trace!("Shutdown signal received, stopping PHP processes if running");
+                            let mut process_guard = process_clone.lock().await;
+                            process_guard.stop().await;
+                            break;
+                        },
+                        _ = stop_services_token.cancelled() => {
+                            trace!("Stop services signal received, stopping PHP processes if running");
+                            let mut process_guard = process_clone.lock().await;
+                            process_guard.stop().await;
+                            break;
+                        },
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                            let mut process_guard = process_clone.lock().await;
+                            if let Err(e) = process_guard.ensure_running().await {
+                                error!("Failed to ensure PHP-CGI process is running: {}", e);
                             }
                         }
                     }
-                });
-            } else {
-                trace!("No Tokio runtime available for keep-alive monitoring, monitoring will be handled per-request");
-            }
+                }
+            });
         }
     }
 

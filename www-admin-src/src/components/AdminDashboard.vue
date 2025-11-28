@@ -253,6 +253,7 @@ onMounted(() => {
                                     <h3>Active Threads</h3>
                                 </div>
                                 <div class="stat-value">{{ stats.activeConnections }}</div>
+                                <div class="stat-subtitle">Including system threads</div>
                             </div>
                         </div>
                         <div class="stats-row">

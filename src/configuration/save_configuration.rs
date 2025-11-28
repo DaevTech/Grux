@@ -1,7 +1,7 @@
 use crate::configuration::binding::Binding;
 use crate::configuration::configuration::Configuration;
 use crate::configuration::core::Core;
-use crate::configuration::load_configuration::load_configuration;
+use crate::configuration::load_configuration::fetch_configuration_in_db;
 use crate::configuration::request_handler::RequestHandler;
 use crate::configuration::site::Site;
 use crate::core::database_connection::get_database_connection;
@@ -18,7 +18,7 @@ pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
     config.validate().map_err(|errors| format!("Configuration validation failed: {}", errors.join("; ")))?;
 
     // Check if the configuration is different from what's currently in the database
-    let current_config = load_configuration()?;
+    let current_config = fetch_configuration_in_db()?;
 
     // Serialize both configurations to JSON for comparison
     let new_config_json = serde_json::to_string(config).map_err(|e| format!("Failed to serialize new configuration: {}", e))?;
@@ -39,18 +39,14 @@ pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
     save_core_config(&connection, &config.core)?;
 
     // Clear and re-insert all bindings (simpler than update/delete logic)
-    connection
-        .execute("DELETE FROM bindings")
-        .map_err(|e| format!("Failed to clear existing bindings: {}", e))?;
+    connection.execute("DELETE FROM bindings").map_err(|e| format!("Failed to clear existing bindings: {}", e))?;
 
     for binding in &config.bindings {
         save_binding(&connection, binding)?;
     }
 
     // Clear and re-insert all sites (simpler than update/delete logic)
-    connection
-        .execute("DELETE FROM sites")
-        .map_err(|e| format!("Failed to clear existing sites: {}", e))?;
+    connection.execute("DELETE FROM sites").map_err(|e| format!("Failed to clear existing sites: {}", e))?;
 
     for site in &config.sites {
         save_site(&connection, site)?;

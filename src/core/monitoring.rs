@@ -1,9 +1,12 @@
-use log::info;
+use crate::{
+    core::{running_state_manager::get_running_state_manager, triggers::get_trigger_handler},
+};
+use log::{info, trace};
 use std::sync::{
     OnceLock,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
-use crate::{configuration::load_configuration::get_configuration, core::async_runtime_handlers::get_async_runtime_handlers, grux_file_cache::get_file_cache};
+use tokio::select;
 
 pub struct MonitoringState {
     requests_served: AtomicUsize,
@@ -11,24 +14,25 @@ pub struct MonitoringState {
     requests_served_per_sec: AtomicUsize,
     waiting_requests: AtomicUsize,
     server_start_time: std::time::Instant,
-    file_cache_enabled: bool,
+    file_cache_enabled: AtomicBool,
     file_cache_current_items: AtomicUsize,
-    file_cache_max_items: usize,
+    file_cache_max_items: AtomicUsize,
 }
 
 impl MonitoringState {
     pub fn new() -> Self {
-        let configuration = get_configuration();
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let configuration = cached_configuration.get_configuration();
 
         MonitoringState {
-            requests_served: AtomicUsize::new(0),       // Updated from http server
-            requests_served_last: AtomicUsize::new(0),       // Updated from monitoring thread
+            requests_served: AtomicUsize::new(0),      // Updated from http server
+            requests_served_last: AtomicUsize::new(0), // Updated from monitoring thread
             requests_served_per_sec: AtomicUsize::new(0),
             waiting_requests: AtomicUsize::new(0),
             server_start_time: std::time::Instant::now(),
-            file_cache_enabled: configuration.core.file_cache.is_enabled,
-            file_cache_current_items: AtomicUsize::new(0),  // Updated from monitoring thread
-            file_cache_max_items: configuration.core.file_cache.cache_item_size,
+            file_cache_enabled: AtomicBool::new(configuration.core.file_cache.is_enabled),
+            file_cache_current_items: AtomicUsize::new(0), // Updated from monitoring thread
+            file_cache_max_items: AtomicUsize::new(configuration.core.file_cache.cache_item_size),
         }
     }
 
@@ -39,30 +43,58 @@ impl MonitoringState {
     }
 
     async fn monitoring_task() {
+        let current_handle = tokio::runtime::Handle::current();
 
-        let handlers = get_async_runtime_handlers();
-        let http_server_handle = &handlers.http_server_handle;
         let update_interval_seconds: usize = 10;
         let update_interval = tokio::time::Duration::from_secs(update_interval_seconds as u64);
 
+        let triggers = get_trigger_handler();
+        let configuration_trigger = triggers.get_trigger("reload_configuration").expect("Failed to get reload_configuration trigger");
+        let mut configuration_token = configuration_trigger.read().await.clone();
+
         loop {
+            let monitoring_state = get_monitoring_state();
+
             // Set how many active threads we have in tokio
-            let metrics = http_server_handle.metrics();
-            get_monitoring_state().waiting_requests.store(metrics.num_alive_tasks(), Ordering::SeqCst);
+            let metrics = current_handle.metrics();
+            monitoring_state.waiting_requests.store(metrics.num_alive_tasks(), Ordering::SeqCst);
 
             // Calculate requests per second
-            let current_requests = get_monitoring_state().get_requests_served();
-            let last_requests = get_monitoring_state().requests_served_last.load(Ordering::SeqCst);
+            let current_requests = monitoring_state.get_requests_served();
+            let last_requests = monitoring_state.requests_served_last.load(Ordering::SeqCst);
             let requests_diff = current_requests.saturating_sub(last_requests);
             let requests_per_sec: f64 = requests_diff as f64 / update_interval_seconds as f64;
-            get_monitoring_state().requests_served_per_sec.store(requests_per_sec.to_bits() as usize, Ordering::SeqCst);
-            get_monitoring_state().requests_served_last.store(current_requests, Ordering::SeqCst);
+            monitoring_state.requests_served_per_sec.store(requests_per_sec.to_bits() as usize, Ordering::SeqCst);
+            monitoring_state.requests_served_last.store(current_requests, Ordering::SeqCst);
 
             // Fetch some data from file cache
-            let file_cache = get_file_cache();
-            get_monitoring_state().file_cache_current_items.store(file_cache.get_current_item_count(), Ordering::SeqCst);
+            {
+                let running_state_manager = get_running_state_manager();
+                let running_state = running_state_manager.get_running_state();
+                let unlocked_running_state = running_state.read().await;
+                let file_cache = unlocked_running_state.get_file_cache();
 
-            tokio::time::sleep(update_interval).await;
+                monitoring_state.file_cache_current_items.store(file_cache.get_current_item_count(), Ordering::SeqCst);
+                // Clone the configuration values we need, then drop the guard
+                let (file_cache_enabled, file_cache_max_items) = {
+                    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+                    let configuration = cached_configuration.get_configuration();
+                    (configuration.core.file_cache.is_enabled, configuration.core.file_cache.cache_item_size)
+                };
+                monitoring_state.file_cache_enabled.store(file_cache_enabled, Ordering::SeqCst);
+                monitoring_state.file_cache_max_items.store(file_cache_max_items, Ordering::SeqCst);
+            }
+
+            trace!("Monitoring data updated");
+
+            select! {
+                _ = configuration_token.cancelled() => {
+                    // Get a new token
+                    let configuration_trigger = triggers.get_trigger("reload_configuration").expect("Failed to get reload_configuration trigger");
+                    configuration_token = configuration_trigger.read().await.clone();
+                },
+                _ = tokio::time::sleep(update_interval) => {}
+            }
         }
     }
 
@@ -75,15 +107,17 @@ impl MonitoringState {
     }
 
     pub fn get_json(&self) -> serde_json::Value {
+        let monitoring_state = get_monitoring_state();
+
         serde_json::json!({
-            "requests_served": self.get_requests_served(),
-            "requests_per_sec": f64::from_bits(self.requests_served_per_sec.load(Ordering::Relaxed) as u64),
-            "waiting_requests": self.waiting_requests.load(Ordering::SeqCst),
-            "uptime_seconds": self.server_start_time.elapsed().as_secs(),
+            "requests_served": monitoring_state.get_requests_served(),
+            "requests_per_sec": f64::from_bits(monitoring_state.requests_served_per_sec.load(Ordering::Relaxed) as u64),
+            "waiting_requests": monitoring_state.waiting_requests.load(Ordering::SeqCst),
+            "uptime_seconds": monitoring_state.server_start_time.elapsed().as_secs(),
             "file_cache": {
-                "enabled": self.file_cache_enabled,
-                "current_items": self.file_cache_current_items.load(Ordering::SeqCst),
-                "max_items": self.file_cache_max_items,
+                "enabled": monitoring_state.file_cache_enabled.load(Ordering::SeqCst),
+                "current_items": monitoring_state.file_cache_current_items.load(Ordering::SeqCst),
+                "max_items": monitoring_state.file_cache_max_items.load(Ordering::SeqCst),
             }
         })
     }

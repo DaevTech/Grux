@@ -122,8 +122,8 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
             sans.clear();
             sans.extend(vec![
                 "localhost".to_string(),
-                "127.0.0.1".to_string(),
-                "::1".to_string(),
+           //     "127.0.0.1".to_string(),
+           //     "::1".to_string(),
             ]);
 
             // Add the machine's hostname if available
@@ -219,9 +219,8 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
         // For wildcard sites, also add some common IP addresses and variations
         if has_wildcard {
             let additional_names = vec![
-                "0.0.0.0",
-                "127.0.0.1",
-                "::1",
+             //   "127.0.0.1",
+             //   "::1",
                 "localhost",
             ];
 

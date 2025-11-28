@@ -1,20 +1,25 @@
 use log::trace;
 use wildcard::{Wildcard, WildcardBuilder};
 use std::sync::OnceLock;
-use crate::configuration::load_configuration::get_configuration;
 
-pub struct BlockedFilePatternMatching<'a> {
-    pub wildcards: Vec<Wildcard<'a>>,
+pub struct BlockedFilePatternMatching {
+    wildcards: Vec<Wildcard<'static>>,
 }
 
-impl<'a> BlockedFilePatternMatching<'a> {
+impl BlockedFilePatternMatching {
     pub fn new() -> Self {
-        let config = get_configuration();
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let config = cached_configuration.get_configuration();
+
         trace!("Initializing blocked file pattern matching with patterns: {:?}", config.core.server_settings.blocked_file_patterns);
-        let wildcards = config.core.server_settings.blocked_file_patterns
+
+        let patterns: Vec<String> = config.core.server_settings.blocked_file_patterns.clone();
+        let wildcards = patterns
             .iter()
             .map(|p| {
-                WildcardBuilder::new(p.as_bytes()).case_insensitive(true).build().unwrap()
+                // Leak the string to get a 'static reference
+                let static_str: &'static str = Box::leak(p.clone().into_boxed_str());
+                WildcardBuilder::new(static_str.as_bytes()).case_insensitive(true).build().unwrap()
             })
             .collect();
 
@@ -35,22 +40,28 @@ impl<'a> BlockedFilePatternMatching<'a> {
 
 static BLOCKED_FILE_PATTERN_MATCHING_SINGLETON: OnceLock<BlockedFilePatternMatching> = OnceLock::new();
 
-pub fn get_blocked_file_pattern_matching() -> &'static BlockedFilePatternMatching<'static> {
+pub fn get_blocked_file_pattern_matching() -> &'static BlockedFilePatternMatching {
     BLOCKED_FILE_PATTERN_MATCHING_SINGLETON.get_or_init(|| BlockedFilePatternMatching::new())
 }
 
-pub struct WhitelistedFilePatternMatching<'a> {
-    pub wildcards: Vec<Wildcard<'a>>,
+pub struct WhitelistedFilePatternMatching {
+    wildcards: Vec<Wildcard<'static>>,
 }
 
-impl<'a> WhitelistedFilePatternMatching<'a> {
+impl WhitelistedFilePatternMatching {
     pub fn new() -> Self {
-        let config = get_configuration();
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let config = cached_configuration.get_configuration();
+
         trace!("Initializing whitelisted file pattern matching with patterns: {:?}", config.core.server_settings.whitelisted_file_patterns);
-        let wildcards = config.core.server_settings.whitelisted_file_patterns
+
+        let patterns: Vec<String> = config.core.server_settings.whitelisted_file_patterns.clone();
+        let wildcards = patterns
             .iter()
             .map(|p| {
-                WildcardBuilder::new(p.as_bytes()).case_insensitive(true).build().unwrap()
+                // Leak the string to get a 'static reference
+                let static_str: &'static str = Box::leak(p.clone().into_boxed_str());
+                WildcardBuilder::new(static_str.as_bytes()).case_insensitive(true).build().unwrap()
             })
             .collect();
 
@@ -71,6 +82,33 @@ impl<'a> WhitelistedFilePatternMatching<'a> {
 
 static WHITELISTED_FILE_PATTERN_MATCHING_SINGLETON: OnceLock<WhitelistedFilePatternMatching> = OnceLock::new();
 
-pub fn get_whitelisted_file_pattern_matching() -> &'static WhitelistedFilePatternMatching<'static> {
+pub fn get_whitelisted_file_pattern_matching() -> &'static WhitelistedFilePatternMatching {
     WHITELISTED_FILE_PATTERN_MATCHING_SINGLETON.get_or_init(|| WhitelistedFilePatternMatching::new())
+}
+
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_blocked_file_pattern_matching() {
+    let blocked_matching = get_blocked_file_pattern_matching();
+    assert!(blocked_matching.is_file_pattern_blocked("index.php"));
+    assert!(blocked_matching.is_file_pattern_blocked("test.tmp"));
+    assert!(blocked_matching.is_file_pattern_blocked(".env"));
+    assert!(blocked_matching.is_file_pattern_blocked(".env.example"));
+    assert!(blocked_matching.is_file_pattern_blocked(".web.config"));
+    assert!(blocked_matching.is_file_pattern_blocked("web.config"));
+    assert!(!blocked_matching.is_file_pattern_blocked("index.html"));
+    assert!(!blocked_matching.is_file_pattern_blocked("index.css"));
+    assert!(blocked_matching.is_file_pattern_blocked("index.php.bak"));
+    assert!(blocked_matching.is_file_pattern_blocked("mylog.log"));
+    assert!(blocked_matching.is_file_pattern_blocked(".DS_Store"));
+    assert!(blocked_matching.is_file_pattern_blocked(".whatever"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_whitelisted_file_pattern_matching() {
+    let whitelisted_matching = get_whitelisted_file_pattern_matching();
+    assert!(whitelisted_matching.is_file_pattern_whitelisted("/var/www/html/.well-known/acme-challenge/token"));
+    assert!(!whitelisted_matching.is_file_pattern_whitelisted("/var/www/html/.DS_STORE"));
+    assert!(!whitelisted_matching.is_file_pattern_whitelisted("/var/www/html/.env"));
+
 }

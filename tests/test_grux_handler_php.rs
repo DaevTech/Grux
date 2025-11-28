@@ -18,8 +18,8 @@ fn test_php_handler_creation() {
     assert_eq!(handler.get_file_matches(), vec![".php".to_string()]);
 }
 
-#[test]
-fn test_php_handler_with_single_process() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_php_handler_with_single_process() {
     let handler = PHPHandler::new(
         "echo".to_string(), // Use 'echo' as a test executable
         "".to_string(), // Empty string means use internal PHP-CGI process
@@ -39,8 +39,8 @@ fn test_php_handler_with_single_process() {
     handler.stop();
 }
 
-#[test]
-fn test_php_handler_lifecycle() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_php_handler_lifecycle() {
     let handler = PHPHandler::new(
         "echo".to_string(), // Use 'echo' as a test executable
         "127.0.0.1:9000".to_string(),
@@ -56,8 +56,8 @@ fn test_php_handler_lifecycle() {
     handler.stop();
 }
 
-#[test]
-fn test_php_handler_concurrent_processing() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_php_handler_concurrent_processing() {
     let handler = PHPHandler::new(
         "echo".to_string(),
         "127.0.0.1:9000".to_string(),

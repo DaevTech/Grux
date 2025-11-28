@@ -1,9 +1,10 @@
 use crate::configuration::configuration::Configuration;
-use crate::configuration::load_configuration::{handle_relationship_binding_sites, load_configuration};
+use crate::configuration::load_configuration::handle_relationship_binding_sites;
 use crate::configuration::save_configuration::save_configuration;
 use crate::configuration::site::Site;
 use crate::core::admin_user::{LoginRequest, authenticate_user, create_session, invalidate_session, verify_session_token};
 use crate::core::monitoring::get_monitoring_state;
+use crate::core::triggers::get_trigger_handler;
 use crate::http::http_util::full;
 use http_body_util::BodyExt;
 use http_body_util::combinators::BoxBody;
@@ -13,19 +14,6 @@ use log::{debug, error, info};
 use serde_json;
 use std::fs;
 use std::path::Path;
-
-pub fn initialize_admin_site() {
-    // Check if there is at least one admin user
-    let connection_result = crate::core::database_connection::get_database_connection();
-    if connection_result.is_err() {
-        error!("Failed to get database connection: {}", connection_result.err().unwrap());
-        return;
-    }
-    let connection = connection_result.unwrap();
-    crate::core::admin_user::create_default_admin_user(&connection).unwrap_or_else(|e| {
-        error!("Failed to create default admin user: {}", e);
-    });
-}
 
 pub async fn handle_login_request(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Check if this is a POST request
@@ -172,8 +160,9 @@ pub async fn admin_get_configuration_endpoint(req: Request<hyper::body::Incoming
         }
     }
 
-    // Get the current configuration
-    let config = load_configuration().unwrap();
+    // Get configuration
+    let config = crate::configuration::load_configuration::init().expect("Expected to be able to load configuration");
+
     let json_config = match serde_json::to_string_pretty(&config) {
         Ok(json) => json,
         Err(e) => {
@@ -186,6 +175,44 @@ pub async fn admin_get_configuration_endpoint(req: Request<hyper::body::Incoming
     };
 
     let mut resp = Response::new(full(json_config));
+    *resp.status_mut() = hyper::StatusCode::OK;
+    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+    Ok(resp)
+}
+
+pub async fn admin_post_configuration_reload(req: Request<hyper::body::Incoming>, _admin_site: &Site) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    // Check authentication first
+    match require_authentication(&req).await {
+        Ok(Some(_session)) => {
+            // User is authenticated, proceed with reloading configuration
+            debug!("User authenticated, reloading configuration");
+        }
+        Ok(None) => {
+            // This shouldn't happen as require_authentication returns error for None
+            let mut resp = Response::new(full(r#"{"error": "Authentication required"}"#));
+            *resp.status_mut() = hyper::StatusCode::UNAUTHORIZED;
+            resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+            return Ok(resp);
+        }
+        Err(auth_response) => {
+            // Authentication failed, return the auth error response
+            return Ok(auth_response);
+        }
+    }
+
+    // Trigger the configuration cache reload
+    let triggers = get_trigger_handler();
+    triggers.run_trigger("refresh_cached_configuration").await;
+    triggers.run_trigger("reload_configuration").await;
+
+    info!("Configuration reload triggered by admin user");
+
+    let success_response = serde_json::json!({
+        "success": true,
+        "message": "Configuration reload initiated. Server is restarting..."
+    });
+
+    let mut resp = Response::new(full(success_response.to_string()));
     *resp.status_mut() = hyper::StatusCode::OK;
     resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
     Ok(resp)
@@ -496,17 +523,13 @@ async fn get_log_file_content(filename: &str) -> Result<Response<BoxBody<Bytes, 
                     let (log_content, is_truncated) = if file_size > max_size {
                         // If file is larger than 1MB, return only the last 1MB
                         let bytes = content.as_bytes();
-                        let start_pos = if bytes.len() > max_size as usize {
-                            bytes.len() - max_size as usize
-                        } else {
-                            0
-                        };
+                        let start_pos = if bytes.len() > max_size as usize { bytes.len() - max_size as usize } else { 0 };
 
                         // Try to start from a newline to avoid cutting mid-line
                         let start_pos = if start_pos > 0 {
                             match bytes[start_pos..].iter().position(|&b| b == b'\n') {
                                 Some(newline_pos) => start_pos + newline_pos + 1,
-                                None => start_pos
+                                None => start_pos,
                             }
                         } else {
                             start_pos

@@ -1,6 +1,4 @@
 use crate::configuration::binding::Binding;
-use crate::configuration::load_configuration::get_configuration;
-use crate::core::shutdown_manager::get_shutdown_manager;
 use crate::http::handle_request::handle_request_entry;
 use crate::http::http_tls::build_tls_acceptor;
 use hyper::server::conn::{http1, http2};
@@ -14,9 +12,10 @@ use tokio::net::TcpListener;
 use tokio::select;
 
 // Starting all the Grux magic
-pub  fn initialize_server() {
-    // Get configuration
-    let config = get_configuration();
+pub async fn initialize_server() -> Vec<tokio::task::JoinHandle<()>> {
+    // Get configuration from the current configuration
+    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+    let config = cached_configuration.get_configuration();
 
     // Collect all server tasks
     let mut server_tasks = Vec::new();
@@ -43,15 +42,36 @@ pub  fn initialize_server() {
 
         // Start listening on the specified address - spawn each binding as a separate task
         let binding_clone = binding.clone();
-        let task = tokio::task::spawn(start_server_binding(binding_clone));
+        let task = tokio::spawn(start_server_binding(binding_clone));
         server_tasks.push(task);
     }
 
-    // Wait for the first task to complete (which should only happen on shutdown or error)
-//    if let Some(first_task) = server_tasks.into_iter().next() {
-//        let _ = first_task.await;
-//    }
+    server_tasks
+}
 
+fn start_listener_with_retry(addr: SocketAddr) -> impl Future<Output = TcpListener> {
+    async move {
+        // Implement a simple retry mechanism
+        let mut attempts = 0;
+        let max_attempts = 5;
+        let retry_delay = std::time::Duration::from_millis(500);
+
+        loop {
+            match TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    return listener;
+                }
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= max_attempts {
+                        panic!("Failed to bind to {} after {} attempts: {}", addr, attempts, e);
+                    }
+                    error!("Failed to bind to {}: {}. Retrying in {:?}...", addr, e, retry_delay);
+                    tokio::time::sleep(retry_delay).await;
+                }
+            }
+        }
+    }
 }
 
 fn start_server_binding(binding: Binding) -> impl Future<Output = ()> {
@@ -60,10 +80,13 @@ fn start_server_binding(binding: Binding) -> impl Future<Output = ()> {
         let port = binding.port;
         let addr = SocketAddr::new(ip, port);
 
-        let listener = TcpListener::bind(addr).await.unwrap();
+        let listener = start_listener_with_retry(addr).await;
         trace!("Listening on binding: {:?}", binding);
 
-        let shutdown_manager = get_shutdown_manager();
+        let triggers = crate::core::triggers::get_trigger_handler();
+
+
+
         if binding.is_tls {
             // TLS path using tokio-rustls so we can inspect ALPN to choose HTTP/2 vs HTTP/1.1
             let acceptor = match build_tls_acceptor(&binding).await {
@@ -73,12 +96,17 @@ fn start_server_binding(binding: Binding) -> impl Future<Output = ()> {
                     return;
                 }
             };
-            let cancellation_token = shutdown_manager.get_cancellation_token();
+            let shutdown_token = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger").read().await.clone();
+            let stop_services_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
 
             loop {
                 select! {
-                    _ = cancellation_token.cancelled() => {
+                    _ = shutdown_token.cancelled() => {
                         trace!("Termination signal received, stopping server on {}:{}", binding.ip, binding.port);
+                        return;
+                    },
+                    _ = stop_services_token.cancelled() => {
+                        trace!("Service cancellation signal received, stopping server on {}:{}", binding.ip, binding.port);
                         return;
                     },
                     result = listener.accept() => {
@@ -127,11 +155,17 @@ fn start_server_binding(binding: Binding) -> impl Future<Output = ()> {
             }
         } else {
             // Non-TLS path
-            let cancellation_token = shutdown_manager.get_cancellation_token();
+            let shutdown_token = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger").read().await.clone();
+            let stop_services_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
+
             loop {
                 select! {
-                    _ = cancellation_token.cancelled() => {
+                    _ = shutdown_token.cancelled() => {
                         trace!("Termination signal received, stopping server on {}:{}", binding.ip, binding.port);
+                        return;
+                    },
+                    _ = stop_services_token.cancelled() => {
+                        trace!("Service stop signal received, stopping server on {}:{}", binding.ip, binding.port);
                         return;
                     },
                     result = listener.accept() => {

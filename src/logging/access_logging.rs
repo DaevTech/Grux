@@ -1,11 +1,10 @@
 use log::{debug, error, trace};
+use std::collections::HashMap;
 use std::time::Instant;
-use std::{collections::HashMap, sync::OnceLock};
 use tokio::select;
 
-use crate::configuration::load_configuration::get_configuration;
-use crate::core::shutdown_manager::get_shutdown_manager;
-use crate::grux_file_util::get_full_file_path;
+use crate::core::running_state_manager::get_running_state_manager;
+use crate::file::file_util::get_full_file_path;
 use crate::logging::buffered_log::BufferedLog;
 
 // Key is site ID, value is buffered log entries
@@ -21,7 +20,8 @@ impl AccessLogBuffer {
         let default_log_path = get_full_file_path(&"./logs".to_string()).unwrap();
 
         // We get the config and add the logs we need
-        let config = get_configuration();
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let config = cached_configuration.get_configuration();
 
         for site in &config.sites {
             if !site.access_log_enabled {
@@ -43,6 +43,8 @@ impl AccessLogBuffer {
             access_log_buffer.buffered_logs.insert(site_id.clone(), BufferedLog::new(site_id.clone(), log_file_path));
         }
 
+        tokio::spawn(Self::start_flushing_thread());
+
         access_log_buffer
     }
 
@@ -58,23 +60,23 @@ impl AccessLogBuffer {
         self.buffered_logs.get(site_id)
     }
 
-    pub fn start_flushing_thread(&self) {
-        tokio::spawn(Self::write_loops());
-    }
-
-    async fn write_loops() {
-        let buffered_logs = get_access_log_buffer();
+    pub async fn start_flushing_thread() {
         trace!("Starting access log write thread");
 
-        let shutdown_manager = get_shutdown_manager();
-        let cancellation_token = shutdown_manager.get_cancellation_token();
+        let triggers = crate::core::triggers::get_trigger_handler();
+        let shutdown_token = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger").read().await.clone();
+        let service_stop_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
+
+        let running_state_manager = get_running_state_manager();
+        let running_state = running_state_manager.get_running_state();
 
         loop {
             select! {
                 // Ideally, this would be adjustable according to the work load (such as elapsed time to do a flush in average)
                 _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
                         let start_time = Instant::now();
-                        for (_site_id, log) in buffered_logs.buffered_logs.iter() {
+
+                        for (_site_id, log) in running_state.read().await.get_access_log_buffer().buffered_logs.iter() {
                             log.consider_flush(false);
                         }
                         let elapsed = start_time.elapsed().as_millis();
@@ -83,9 +85,16 @@ impl AccessLogBuffer {
                         }
 
                 },
-                _ = cancellation_token.cancelled() => {
+                _ = shutdown_token.cancelled() => {
                     trace!("Access log write thread received shutdown signal, so flushing remaining logs and exiting");
-                    for (_site_id, log) in buffered_logs.buffered_logs.iter() {
+                    for (_site_id, log) in running_state.read().await.get_access_log_buffer().buffered_logs.iter() {
+                        log.consider_flush(true);
+                    }
+                    break;
+                },
+                _ = service_stop_token.cancelled() => {
+                    trace!("Access log write thread received stop services signal, so flushing remaining logs and exiting");
+                    for (_site_id, log) in running_state.read().await.get_access_log_buffer().buffered_logs.iter() {
                         log.consider_flush(true);
                     }
                     break;
@@ -93,10 +102,4 @@ impl AccessLogBuffer {
             }
         }
     }
-}
-
-// Get the configuration
-pub fn get_access_log_buffer() -> &'static AccessLogBuffer {
-    static CONFIG: OnceLock<AccessLogBuffer> = OnceLock::new();
-    CONFIG.get_or_init(|| AccessLogBuffer::new())
 }

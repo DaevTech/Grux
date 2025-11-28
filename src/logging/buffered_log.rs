@@ -1,5 +1,4 @@
 use log::trace;
-use std::fs::write;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -37,7 +36,10 @@ impl BufferedLog {
             buffered_log.log_file_path = log_path_buf.to_string_lossy().to_string();
         }
 
-        write(&buffered_log.log_file_path, "").unwrap();
+        // Create the log file if it does not exist
+        if !std::path::Path::new(&buffered_log.log_file_path).exists() {
+            std::fs::File::create(&buffered_log.log_file_path).unwrap();
+        }
 
         buffered_log
     }

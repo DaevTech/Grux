@@ -48,28 +48,22 @@ pub fn init_logging(operation_mode: OperationMode) -> Result<log4rs::Handle, Str
                 .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("stderr", Box::new(stderr)))
                 .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Trace))).build("trace", Box::new(trace_logfile)))
                 .build(Root::builder().appender("logfile").appender("stderr").appender("trace").build(LevelFilter::Trace))
-                .map_err(| e | format!("Failed to build log4rs config for DEV mode: {}", e))?
+                .map_err(|e| format!("Failed to build log4rs config for DEV mode: {}", e))?
         }
-        OperationMode::DEBUG => {
-            Config::builder()
-                .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Debug))).build("logfile", Box::new(logfile)))
-                .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("stdout", Box::new(stderr)))
-                .build(Root::builder().appender("logfile").appender("stdout").build(LevelFilter::Debug))
-                .map_err(| e | format!("Failed to build log4rs config for DEBUG mode: {}", e))?
-        }
-        OperationMode::PRODUCTION => {
-            Config::builder()
-                .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("logfile", Box::new(logfile)))
-                .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("stderr", Box::new(stderr)))
-                .build(Root::builder().appender("logfile").appender("stderr").build(LevelFilter::Info))
-                .map_err(| e | format!("Failed to build log4rs config for PRODUCTION mode: {}", e))?
-        }
-        OperationMode::SPEEDTEST => {
-            Config::builder()
-                .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Error))).build("stderr", Box::new(stderr)))
-                .build(Root::builder().appender("stderr").build(LevelFilter::Error))
-                .map_err(| e | format!("Failed to build log4rs config for SPEEDTEST mode: {}", e))?
-        }
+        OperationMode::DEBUG => Config::builder()
+            .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Debug))).build("logfile", Box::new(logfile)))
+            .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("stdout", Box::new(stderr)))
+            .build(Root::builder().appender("logfile").appender("stdout").build(LevelFilter::Debug))
+            .map_err(|e| format!("Failed to build log4rs config for DEBUG mode: {}", e))?,
+        OperationMode::PRODUCTION => Config::builder()
+            .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("logfile", Box::new(logfile)))
+            .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Info))).build("stderr", Box::new(stderr)))
+            .build(Root::builder().appender("logfile").appender("stderr").build(LevelFilter::Info))
+            .map_err(|e| format!("Failed to build log4rs config for PRODUCTION mode: {}", e))?,
+        OperationMode::SPEEDTEST => Config::builder()
+            .appender(Appender::builder().filter(Box::new(ThresholdFilter::new(LevelFilter::Error))).build("stderr", Box::new(stderr)))
+            .build(Root::builder().appender("stderr").build(LevelFilter::Error))
+            .map_err(|e| format!("Failed to build log4rs config for SPEEDTEST mode: {}", e))?,
     };
 
     // Use this to change log levels at runtime.

@@ -1,8 +1,7 @@
 pub mod grux_log;
-pub mod grux_file_cache;
+pub mod file;
 pub mod external_request_handlers;
 pub mod grux_port_manager;
-pub mod grux_file_util;
 pub mod core;
 pub mod http;
 pub mod admin_portal;

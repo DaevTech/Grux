@@ -1,15 +1,13 @@
 use crate::admin_portal::http_admin_api::*;
 use crate::configuration::binding::Binding;
-use crate::configuration::load_configuration::get_configuration;
 use crate::configuration::site::Site;
 use crate::core::monitoring::get_monitoring_state;
-use crate::external_request_handlers::external_request_handlers;
-use crate::grux_file_cache::CachedFile;
-use crate::grux_file_cache::get_file_cache;
-use crate::grux_file_util::check_path_secure;
-use crate::grux_file_util::get_full_file_path;
+use crate::core::running_state_manager::get_running_state_manager;
+use crate::file::file_cache::CachedFile;
+use crate::file::file_cache::FileCache;
+use crate::file::file_util::check_path_secure;
+use crate::file::file_util::get_full_file_path;
 use crate::http::http_util::*;
-use crate::logging::access_logging::get_access_log_buffer;
 use chrono::Local;
 use http_body_util::BodyExt;
 use http_body_util::combinators::BoxBody;
@@ -64,7 +62,11 @@ pub async fn handle_request_entry(req: Request<hyper::body::Incoming>, binding: 
 
     // Handle access logging
     if site.access_log_enabled {
-        let access_log = get_access_log_buffer();
+        let running_state_manager = get_running_state_manager();
+        let running_state = running_state_manager.get_running_state();
+        let unlocked_running_state = running_state.read().await;
+        let access_log_buffer = unlocked_running_state.get_access_log_buffer();
+
         // Get current date and time in CLF format, which is like 10/Oct/2000:13:55:36 -0700
         let now = Local::now();
         let clf_date = now.format("%d/%b/%Y:%H:%M:%S %z").to_string();
@@ -78,7 +80,7 @@ pub async fn handle_request_entry(req: Request<hyper::body::Incoming>, binding: 
             response.as_ref().map(|resp| resp.status().as_u16()).unwrap_or(0),
             response.as_ref().map(|resp| resp.size_hint().upper().unwrap_or(0)).unwrap_or(0)
         );
-        access_log.add_log(site.id.to_string(), log_entry);
+        access_log_buffer.add_log(site.id.to_string(), log_entry);
     }
 
     response
@@ -114,6 +116,10 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
         return Ok(resp);
     }
 
+    let running_state_manager = get_running_state_manager();
+    let running_state = running_state_manager.get_running_state();
+    let unlocked_running_state = running_state.read().await;
+
     // Put the rewrite functions in a hashmap, so we can easily check them
     let rewrite_functions = {
         let mut map = HashMap::new();
@@ -143,6 +149,8 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
             return admin_healthcheck_endpoint(req, site).await;
         } else if (path_cleaned == "logs" || path_cleaned.starts_with("logs/")) && method == hyper::Method::GET {
             return admin_logs_endpoint(req, site).await;
+        } else if (path_cleaned == "configuration/reload") && method == hyper::Method::POST {
+            return admin_post_configuration_reload(req, site).await;
         }
     }
 
@@ -182,7 +190,8 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
     let web_root = web_root_result.unwrap();
 
     // Get the cached file, if it exists
-    let file_data_result = resolve_web_root_and_path_and_get_file(web_root.clone(), path.to_string());
+    let file_cache = unlocked_running_state.get_file_cache();
+    let file_data_result = resolve_web_root_and_path_and_get_file(file_cache, web_root.clone(), path.to_string());
     if let Err(_) = file_data_result {
         return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
     }
@@ -197,7 +206,7 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
             path = "/";
 
             // Get the cached file, if it exists
-            let file_data_result = resolve_web_root_and_path_and_get_file(web_root.clone(), path.to_string());
+            let file_data_result = resolve_web_root_and_path_and_get_file(file_cache, web_root.clone(), path.to_string());
             if let Err(_) = file_data_result {
                 return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
             }
@@ -216,7 +225,7 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
         let mut found_index = false;
         for file in &site.web_root_index_file_list {
             // Get the cached file, if it exists
-            let file_data_result = resolve_web_root_and_path_and_get_file(file_path.clone(), file.to_string());
+            let file_data_result = resolve_web_root_and_path_and_get_file(file_cache, file_path.clone(), file.to_string());
             if let Err(_) = file_data_result {
                 trace!("Index files in dir does not exist: {}", file_path);
                 continue;
@@ -257,40 +266,36 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
 
     // We check if is a request we need to handle another way, such as PHP intepreter
     // We only go through the handlers that are active for this site
-    let mut handler_response = Response::new(full(""));
     let mut handler_did_stuff = false;
-    let mut handler_had_error = false;
-    let external_request_handlers = external_request_handlers::get_request_handlers();
+
+    // Create the response
+    let mut additional_headers: Vec<(&str, &str)> = vec![];
+    let mut response = Response::new(full(""));
+
+    let external_request_handlers = unlocked_running_state.get_external_request_handlers();
 
     for handler_id in &site.enabled_handlers {
         // Check if handler is relevant for this request, primarily based on file matches
-        if !external_request_handlers.is_handler_relevant(handler_id, &file_path) {
+        if !&external_request_handlers.is_handler_relevant(handler_id, &file_path).await {
             continue;
         }
 
         let handler_response_result = external_request_handlers
             .handle_external_request(handler_id, &method, &uri, &headers, &body_bytes, &site, &file_path, &remote_ip, &http_version)
             .await;
-        handler_response = match handler_response_result {
+        match handler_response_result {
             Ok(resp) => {
                 handler_did_stuff = true;
-                resp
+                response = resp;
             }
             Err(e) => {
                 debug!("Error from external handler {}: {}", handler_id, e);
-                handler_did_stuff = true;
-                handler_had_error = true;
-                empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                return Ok(empty_response_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR));
             }
         };
         if handler_did_stuff {
             break;
         }
-    }
-
-    // If the handler had an error, we return the error response
-    if handler_had_error {
-        return Ok(handler_response);
     }
 
     // Do a safety check of the path, make sure it's still under the web root and not blocked
@@ -302,17 +307,13 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
         }
     }
 
-    // Create the response
-    let mut additional_headers: Vec<(&str, &str)> = vec![];
-    let mut response;
     if handler_did_stuff {
         // We do not set a default Content-Type here, as the handler should do that
-        response = handler_response;
 
         // Consider gzipping content if not already gzipped
         let content_type_header = response.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("");
         let content_length = response.size_hint().upper().unwrap_or(0);
-        let file_cache = get_file_cache();
+        let file_cache = unlocked_running_state.get_file_cache();
         if file_cache.should_compress(content_type_header, content_length) {
             // Gzip the body
             // First, preserve the original headers and status
@@ -402,12 +403,11 @@ async fn handle_request(req: Request<hyper::body::Incoming>, binding: &Binding, 
 }
 
 // Combine the web root and path, and resolve to a full path
-fn resolve_web_root_and_path_and_get_file(web_root: String, path: String) -> Result<CachedFile, std::io::Error> {
+fn resolve_web_root_and_path_and_get_file(file_cache: &FileCache, web_root: String, path: String) -> Result<CachedFile, std::io::Error> {
     let path_cleaned = clean_url_path(&path);
     let mut file_path = format!("{}/{}", web_root, path_cleaned);
     trace!("Resolved file path for resolving: {}", file_path);
     file_path = get_full_file_path(&file_path)?;
-    let file_cache = get_file_cache();
     let file_data = file_cache.get_file(&file_path).unwrap();
     Ok(file_data)
 }
@@ -445,7 +445,8 @@ async fn validate_request(
     expected_body_size: usize,
 ) -> Result<(), Response<BoxBody<Bytes, hyper::Error>>> {
     // Here we can add any request validation logic if needed
-    let configuration = get_configuration();
+    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+    let configuration = cached_configuration.get_configuration();
 
     // Validation for HTTP/1.1 only
     if http_version == "HTTP/1.1" {
@@ -502,7 +503,8 @@ async fn validate_request_post_body(
     body_bytes: &[u8],
 ) -> Result<(), Response<BoxBody<Bytes, hyper::Error>>> {
     // Here we can add any post-body request validation logic if needed
-    let configuration = get_configuration();
+    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+    let configuration = cached_configuration.get_configuration();
 
     // We check the size of the body again, after we actually have the complete body
     let max_body_size = configuration.core.server_settings.max_body_size;

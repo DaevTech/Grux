@@ -1,14 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{debug, info, warn, trace};
-use lazy_static::lazy_static;
 
-// Singleton instance of the port manager
-lazy_static! {
-    /// Global singleton instance of the PortManager
-    /// Manages ports from 9000 to 10000 for all services
-    pub static ref PORT_MANAGER: PortManager = PortManager::new(9000, 10000);
+static PORT_MANAGER_SINGLETON: OnceLock<PortManager> = OnceLock::new();
+
+pub fn get_port_manager() -> &'static PortManager {
+    PORT_MANAGER_SINGLETON.get_or_init(|| PortManager::new(9000, 10000))
 }
 
 /// A generalized port manager that assigns unique ports to processes
@@ -55,15 +53,6 @@ impl PortManager {
                 next_port: start_port,
             })),
         }
-    }
-
-    /// Get the singleton instance of the PortManager
-    /// This is the recommended way to access the port manager
-    ///
-    /// # Returns
-    /// * Reference to the global singleton PortManager instance
-    pub fn instance() -> &'static PortManager {
-        &PORT_MANAGER
     }
 
     /// Allocate a port for the specified service/process ID
@@ -171,4 +160,83 @@ impl PortManager {
         let allocated_count = inner.allocated_ports.len();
         total_range - allocated_count
     }
+}
+
+#[tokio::test]
+async fn test_port_allocation() {
+    let manager = PortManager::new(9000, 9002);
+
+    // Test basic allocation
+    let port1 = manager.allocate_port("service1".to_string()).await;
+    assert_eq!(port1, Some(9000));
+
+    let port2 = manager.allocate_port("service2".to_string()).await;
+    assert_eq!(port2, Some(9001));
+
+    let port3 = manager.allocate_port("service3".to_string()).await;
+    assert_eq!(port3, Some(9002));
+
+    // Should return None when no more ports available
+    let port4 = manager.allocate_port("service4".to_string()).await;
+    assert_eq!(port4, None);
+}
+
+#[tokio::test]
+async fn test_port_release_and_reuse() {
+    let manager = PortManager::new(9000, 9001);
+
+    // Allocate all ports
+    let port1 = manager.allocate_port("service1".to_string()).await;
+    let port2 = manager.allocate_port("service2".to_string()).await;
+    assert_eq!(port1, Some(9000));
+    assert_eq!(port2, Some(9001));
+
+    // No more ports available
+    let port3 = manager.allocate_port("service3".to_string()).await;
+    assert_eq!(port3, None);
+
+    // Release a port
+    manager.release_port(9000).await;
+
+    // Should be able to reuse the released port
+    let port4 = manager.allocate_port("service4".to_string()).await;
+    assert_eq!(port4, Some(9000));
+}
+
+#[tokio::test]
+async fn test_release_all_ports_for_service() {
+    let manager = PortManager::new(9000, 9002);
+
+    // Allocate ports to different services
+    manager.allocate_port("service1".to_string()).await;
+    manager.allocate_port("service1".to_string()).await;
+    manager.allocate_port("service2".to_string()).await;
+
+    // Release all ports for service1
+    let released = manager.release_all_ports_for_service("service1").await;
+    assert_eq!(released.len(), 2);
+
+    // Should be able to allocate new ports now
+    let port = manager.allocate_port("service3".to_string()).await;
+    assert!(port.is_some());
+}
+
+#[tokio::test]
+async fn test_singleton_manager() {
+    let manager = get_port_manager();
+
+    let port = manager.allocate_port("php-worker-1".to_string()).await;
+    assert_eq!(port, Some(9000));
+
+    let available_count = manager.available_port_count().await;
+    assert_eq!(available_count, 1000); // 9000-10000 = 1001 ports, 1 allocated
+
+    // Test that multiple calls return the same instance
+    let manager2 = get_port_manager();
+    let port2 = manager2.allocate_port("php-worker-2".to_string()).await;
+    assert_eq!(port2, Some(9001));
+
+    // Clean up
+    manager.release_port(9000).await;
+    manager.release_port(9001).await;
 }

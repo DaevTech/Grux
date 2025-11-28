@@ -1,5 +1,8 @@
+use crate::core::triggers::get_trigger_handler;
+use log::info;
+#[cfg(windows)]
 use tokio::signal;
-use crate::core::shutdown_manager::get_shutdown_manager;
+
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -13,29 +16,39 @@ async fn handle_unix_signals() -> Result<(), Box<dyn std::error::Error>> {
         _ = async {
             loop {
                 sigterm.recv().await;
-                handle_graceful_shutdown();
+                let triggers = get_trigger_handler();
+                info!("Shutdown signal received, starting shutdown process");
+                triggers.run_trigger("shutdown").await;
             }
         } => {},
         _ = async {
             loop {
                 sigint.recv().await;
-                handle_graceful_shutdown();
+                let triggers = get_trigger_handler();
+                info!("Shutdown signal received, starting shutdown process");
+                triggers.run_trigger("shutdown").await;
             }
         } => {},
         _ = async {
             loop {
                 sighup.recv().await;
-                handle_configuration_reload();
+                let triggers = get_trigger_handler();
+                info!("Reload configuration signal received, starting reload process");
+                triggers.run_trigger("reload_configuration").await;
             }
         } => {},
-    }
+    };
+
+    Ok(())
 }
 
 #[cfg(windows)]
 async fn handle_windows_signals() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         signal::ctrl_c().await?;
-        handle_graceful_shutdown();
+        info!("Shutdown signal received, starting shutdown process");
+        let triggers = get_trigger_handler();
+        triggers.run_trigger("shutdown").await;
     }
 }
 
@@ -53,17 +66,4 @@ pub fn start_os_signal_handling() {
             log::error!("Error handling Windows signals: {}", e);
         }
     });
-}
-
-// Do graceful shutdown
-fn handle_graceful_shutdown() {
-    log::info!("Starting shutting down Grux...");
-    get_shutdown_manager().initiate_shutdown();
-
-}
-
-// Configuration reload due to OS signals
-fn handle_configuration_reload() {
-    log::info!("Reloading configuration...");
-    // Set a flag or notify relevant components to reload configuration
 }
