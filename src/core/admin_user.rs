@@ -50,8 +50,8 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
     let mut need_to_clear_sessions = false;
 
     // Reset admin password if requested via command line
-    let cli = crate::core::command_line_args::get_command_line_args();
-    if admin_exists && cli.reset_admin_password {
+    let should_reset_admin_password = crate::core::command_line_args::cmd_should_reset_admin_password();
+    if admin_exists && should_reset_admin_password {
         let (random_password, password_hash) = get_random_hashed_password();
         connection
             .execute(format!("UPDATE users SET password_hash = '{}' WHERE username = 'admin'", password_hash))

@@ -1,4 +1,5 @@
 use grux::configuration::cached_configuration::get_cached_configuration;
+use grux::core::command_line_args::{check_for_command_line_actions, get_command_line_args};
 use grux::core::database_schema;
 use grux::core::operation_mode::get_operation_mode;
 use grux::core::running_state_manager::get_running_state_manager;
@@ -60,6 +61,10 @@ async fn main() {
 }
 
 fn start_grux_basics() {
+    // Load commandline args
+    get_command_line_args();
+    check_for_command_line_actions();
+
     // Load operation mode
     let operation_mode = get_operation_mode();
 

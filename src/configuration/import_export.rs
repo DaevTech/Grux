@@ -1,0 +1,60 @@
+use crate::configuration::load_configuration::fetch_configuration_in_db;
+use crate::configuration::load_configuration::handle_relationship_binding_sites;
+use std::path::PathBuf;
+
+pub fn export_configuration_to_file(path: &PathBuf, exit_after: bool) -> Result<(), String> {
+    let cached_configuration = fetch_configuration_in_db().expect("Could not load configuration for export");
+
+    // Serialize configuration to JSON
+    let serialized = serde_json::to_string_pretty(&cached_configuration).map_err(|e| format!("Failed to serialize configuration: {}", e))?;
+
+    std::fs::write(path, serialized).map_err(|e| format!("Failed to write configuration to file: {}", e))?;
+    println!("Configuration successfully exported to {}", path.display());
+
+    // Exit process if specified
+    if exit_after {
+        std::process::exit(0);
+    }
+
+    Ok(())
+}
+
+pub fn import_configuration_from_file(path: &PathBuf, exit_after: bool) -> Result<(), String> {
+    // Read file contents
+    let file_contents = std::fs::read_to_string(path).map_err(|e| format!("Failed to read configuration file {}: {}", path.display(), e))?;
+
+    // Load json into loose typed to validate version and possibly do version migrations later
+    let loose_typed: serde_json::Value = serde_json::from_str(&file_contents).map_err(|e| format!("Failed to parse configuration file {}: {}", path.display(), e))?;
+
+    // Check that versions match
+    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION.to_string() {
+
+        // Here we could add version migration logic in the future
+
+        // If we reach here, versions do not match
+        return Err(format!(
+            "Configuration version mismatch: expected {}, found {}",
+            crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION,
+            loose_typed["version"].as_str().unwrap_or("unknown")
+        ));
+    }
+
+    // Deserialize JSON to Configuration struct
+    let mut configuration: crate::configuration::configuration::Configuration =
+        serde_json::from_str(&file_contents).map_err(|e| format!("Failed to deserialize configuration from file {}: {}", path.display(), e))?;
+
+    // Process the binding-site relationships
+    handle_relationship_binding_sites(&configuration.binding_sites, &mut configuration.bindings, &configuration.sites);
+
+    // Save configuration to database
+    crate::configuration::save_configuration::save_configuration(&mut configuration).map_err(|e| format!("Failed to save imported configuration to database: {}", e))?;
+
+    println!("Configuration successfully imported from {}", path.display());
+
+    // Exit process if specified
+    if exit_after {
+        std::process::exit(0);
+    }
+
+    Ok(())
+}

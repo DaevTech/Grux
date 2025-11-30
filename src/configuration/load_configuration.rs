@@ -1,4 +1,5 @@
 use crate::configuration::binding_site_relation::BindingSiteRelationship;
+use crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION;
 use crate::core::operation_mode::{OperationMode, get_operation_mode};
 use crate::{
     configuration::{binding::Binding, configuration::Configuration, core::Core, request_handler::RequestHandler, save_configuration::save_configuration, site::Site},
@@ -67,15 +68,16 @@ pub fn fetch_configuration_in_db() -> Result<Configuration, String> {
 
     // Load all configuration components
     let mut bindings = load_bindings(&connection)?;
-    let mut sites = load_sites(&connection)?;
+    let sites = load_sites(&connection)?;
     let binding_sites = load_binding_sites_relationships(&connection)?;
     let core = load_core_config(&connection)?;
     let request_handlers = load_request_handlers(&connection)?;
 
     // Process the binding-site relationships
-    handle_relationship_binding_sites(&binding_sites, &mut bindings, &mut sites);
+    handle_relationship_binding_sites(&binding_sites, &mut bindings, &sites);
 
     Ok(Configuration {
+        version: CURRENT_CONFIGURATION_VERSION.to_string(),
         bindings,
         sites,
         binding_sites,
@@ -84,7 +86,7 @@ pub fn fetch_configuration_in_db() -> Result<Configuration, String> {
     })
 }
 
-pub fn handle_relationship_binding_sites(relationships: &Vec<BindingSiteRelationship>, bindings: &mut Vec<Binding>, sites: &mut Vec<Site>) {
+pub fn handle_relationship_binding_sites(relationships: &Vec<BindingSiteRelationship>, bindings: &mut Vec<Binding>, sites: &Vec<Site>) {
     // For sites and binding, generate hashmaps for quick lookup
     let mut binding_map = bindings.iter_mut().map(|b| (b.id, b)).collect::<HashMap<_, _>>();
     let site_map = sites.iter().map(|s| (s.id, s)).collect::<HashMap<_, _>>();

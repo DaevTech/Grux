@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Configuration {
+    pub version: String,
     pub bindings: Vec<Binding>,
     pub sites: Vec<Site>,
     pub binding_sites: Vec<BindingSiteRelationship>,
@@ -17,9 +18,12 @@ pub struct Configuration {
     pub request_handlers: Vec<RequestHandler>,
 }
 
+pub static CURRENT_CONFIGURATION_VERSION: i32 = 1;
+
 impl Configuration {
     pub fn new() -> Self {
         Configuration {
+            version: CURRENT_CONFIGURATION_VERSION.to_string(),
             bindings: vec![],
             sites: vec![],
             binding_sites: vec![],

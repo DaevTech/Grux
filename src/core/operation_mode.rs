@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use crate::core::command_line_args::get_command_line_args;
+use crate::core::command_line_args::cmd_get_operation_mode;
 
 // Operation mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,16 +16,16 @@ pub enum OperationMode {
 pub static GRUX_OPERATION_MODE: OperationMode = OperationMode::PRODUCTION;
 
 pub fn load_operation_mode() -> OperationMode {
-     // Parse command line args
-    let cli = get_command_line_args();
+    // Parse command line args
+    let opmode = cmd_get_operation_mode();
 
-    cli.opmode.map(|s| match s.as_str() {
+    match opmode.as_str() {
         "DEV" => OperationMode::DEV,
         "DEBUG" => OperationMode::DEBUG,
         "PRODUCTION" => OperationMode::PRODUCTION,
         "SPEEDTEST" => OperationMode::SPEEDTEST,
-        _ => OperationMode::DEV,
-    }).unwrap_or(OperationMode::PRODUCTION)
+        _ => OperationMode::PRODUCTION,
+    }
 }
 
 static OPERATION_MODE_SINGLETON: OnceLock<OperationMode> = OnceLock::new();
