@@ -17,7 +17,7 @@ pub fn load_command_line_args() -> ArgMatches {
         .arg(
             Arg::new("reset-admin-password")
                 .long("reset-admin-password")
-                .help("Reset the admin password when server starts")
+                .help("Reset the admin password and exit")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -74,6 +74,12 @@ pub fn cmd_should_reset_admin_password() -> bool {
 
 pub fn check_for_command_line_actions() {
     let cli = get_command_line_args();
+
+    if cmd_should_reset_admin_password() {
+        let new_password = crate::core::admin_user::reset_admin_password().expect("Failed to reset admin password");
+        println!("Admin password has been reset to: '{}'.", new_password);
+        std::process::exit(0);
+    }
 
     // Check for export configuration
     if let Some(path) = cli.get_one::<PathBuf>("export-configuration") {

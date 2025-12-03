@@ -49,17 +49,6 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
 
     let mut need_to_clear_sessions = false;
 
-    // Reset admin password if requested via command line
-    let should_reset_admin_password = crate::core::command_line_args::cmd_should_reset_admin_password();
-    if admin_exists && should_reset_admin_password {
-        let (random_password, password_hash) = get_random_hashed_password();
-        connection
-            .execute(format!("UPDATE users SET password_hash = '{}' WHERE username = 'admin'", password_hash))
-            .map_err(|e| format!("Failed to reset admin password: {}", e))?;
-        info!("Admin password reset to: '{}'", random_password);
-        need_to_clear_sessions = true;
-    }
-
     if !admin_exists {
         let (random_password, password_hash) = get_random_hashed_password();
 
@@ -78,13 +67,32 @@ pub fn create_default_admin_user(connection: &Connection) -> Result<(), String> 
 
     if need_to_clear_sessions {
         // Invalidate all existing sessions for admin user
-        connection
-            .execute("DELETE FROM sessions WHERE username = 'admin'".to_string())
-            .map_err(|e| format!("Failed to invalidate admin sessions: {}", e))?;
-        info!("All existing admin sessions have been invalidated.");
+        invalidate_sessions_for_user(connection, "admin")?;
     }
 
     Ok(())
+}
+
+fn invalidate_sessions_for_user(connection: &Connection, username: &str) -> Result<(), String> {
+    connection
+        .execute(format!("DELETE FROM sessions WHERE username = '{}'", username))
+        .map_err(|e| format!("Failed to invalidate sessions for user {}: {}", username, e))?;
+    Ok(())
+}
+
+pub fn reset_admin_password() -> Result<String, String> {
+    let connection = get_database_connection()?;
+
+    let (random_password, password_hash) = get_random_hashed_password();
+    connection
+        .execute(format!("UPDATE users SET password_hash = '{}' WHERE username = 'admin'", password_hash))
+        .map_err(|e| format!("Failed to reset admin password: {}", e))?;
+    info!("Password changed for user 'admin' to: {}", random_password);
+
+    // Invalidate all existing sessions for admin user
+    invalidate_sessions_for_user(&connection, "admin")?;
+
+    Ok(random_password)
 }
 
 fn get_random_hashed_password() -> (String, String) {
