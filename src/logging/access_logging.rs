@@ -86,7 +86,6 @@ impl AccessLogBuffer {
                         if elapsed > 0 {
                             debug!("Access log flush cycle completed in {} ms", elapsed);
                         }
-
                 },
                 _ = shutdown_token.cancelled() => {
                     trace!("Access log write thread received shutdown signal, so flushing remaining logs and exiting");

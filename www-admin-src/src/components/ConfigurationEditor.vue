@@ -16,6 +16,11 @@ const props = defineProps({
 // Define emits
 const emit = defineEmits(['close']);
 
+// Available rewrite function options
+const rewriteFunctionOptions = [
+    'OnlyWebRootIndexForSubdirs',
+];
+
 // State
 const isLoading = ref(false);
 const isSaving = ref(false);
@@ -859,10 +864,18 @@ onMounted(() => {
 
                                 <!-- Rewrite Functions -->
                                 <div class="list-field compact half-width">
-                                    <label>Rewrite Functions</label>
+                                    <label>Rewrite Functions - Pre-defined request rewrites</label>
+                                    <div class="doc-link">
+                                        <a href="https://grux.eu/docs/#rewrite-functions" target="_blank">Documentation on rewrite functions</a>
+                                    </div>
                                     <div class="list-items">
                                         <div v-for="(func, funcIndex) in site.rewrite_functions" :key="funcIndex" class="list-item">
-                                            <input v-model="site.rewrite_functions[funcIndex]" type="text" placeholder="Function name" />
+                                            <select v-model="site.rewrite_functions[funcIndex]" class="rewrite-select">
+                                                <option value="">-- Select Function --</option>
+                                                <option v-for="option in rewriteFunctionOptions" :key="option" :value="option">
+                                                    {{ option }}
+                                                </option>
+                                            </select>
                                             <button @click="removeRewriteFunction(siteIndex, funcIndex)" class="remove-item-button">×</button>
                                         </div>
                                         <button @click="addRewriteFunction(siteIndex)" class="add-item-button">+ Add Function</button>
@@ -2524,6 +2537,39 @@ onMounted(() => {
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.rewrite-select {
+    flex: 1;
+    padding: 0.45rem;
+    border: 2px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    background: white;
+    transition: all 0.2s ease;
+}
+
+.rewrite-select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.doc-link {
+    margin-bottom: 0.75rem;
+    font-size: 0.8rem;
+}
+
+.doc-link a {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.doc-link a:hover {
+    color: #764ba2;
+    text-decoration: underline;
 }
 
 .form-field select {

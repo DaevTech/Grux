@@ -15,9 +15,6 @@ pub struct ExternalRequestHandlers {
     pub php: HashMap<String, PHPHandler>,
 }
 
-// Supported rewrite functions
-pub static REWRITE_FUNCTIONS: &[&str] = &["OnlyWebRootIndexForSubdirs"];
-
 // A trait for external request handlers
 #[allow(async_fn_in_trait)]
 pub trait ExternalRequestHandler {

@@ -30,6 +30,9 @@ pub struct Site {
     pub access_log_file: String,
 }
 
+// Supported rewrite functions
+pub static REWRITE_FUNCTIONS: &[&str] = &["OnlyWebRootIndexForSubdirs"];
+
 impl Site {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
@@ -60,6 +63,29 @@ impl Site {
         for (file_idx, file) in self.web_root_index_file_list.iter().enumerate() {
             if file.trim().is_empty() {
                 errors.push(format!("Index file {} cannot be empty", file_idx + 1));
+            }
+        }
+
+        // Validate the rewrite functions
+        for (func_idx, func) in self.rewrite_functions.iter().enumerate() {
+            if func.trim().is_empty() {
+                errors.push(format!("Rewrite function {} cannot be empty", func_idx + 1));
+            }
+        }
+
+        // Validate the rewrite functions are unique
+        let mut unique_funcs = std::collections::HashSet::new();
+        for func in &self.rewrite_functions {
+            if !unique_funcs.insert(func) {
+                errors.push(format!("Duplicate rewrite function found: '{}'", func));
+            }
+        }
+
+        // Rewrite functions values must be within the known list
+        let known_rewrite_functions: Vec<&str> = REWRITE_FUNCTIONS.to_vec();
+        for func in &self.rewrite_functions {
+            if !known_rewrite_functions.contains(&func.as_str()) {
+                errors.push(format!("Unknown rewrite function: '{}'", func));
             }
         }
 
@@ -104,9 +130,6 @@ impl Site {
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 }
-
-
-
 
 #[test]
 fn test_site_validation_access_log_enabled_empty_file() {
@@ -172,6 +195,125 @@ fn test_site_validation_access_log_enabled_windows_valid_file() {
 
     let result = site.validate();
     assert!(result.is_ok(), "Valid Windows access log file should pass validation");
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_single_valid() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["OnlyWebRootIndexForSubdirs".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_ok(), "Single valid rewrite function should pass validation");
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_empty_value() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(errors.iter().any(|e| e.contains("Rewrite function 1 cannot be empty")), "Expected error for empty rewrite function");
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_multiple_with_empty() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["OnlyWebRootIndexForSubdirs".to_string(), "".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Rewrite function 2 cannot be empty")),
+        "Expected error for second (empty) rewrite function"
+    );
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_unknown_value() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["UnknownRewriteFunction".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Unknown rewrite function: 'UnknownRewriteFunction'")),
+        "Expected error for unknown rewrite function"
+    );
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_mixed_known_and_unknown() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["OnlyWebRootIndexForSubdirs".to_string(), "UnknownRewriteFunction".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Unknown rewrite function: 'UnknownRewriteFunction'")),
+        "Expected error for the unknown rewrite function"
+    );
+    assert!(
+        !errors.iter().any(|e| e.contains("Unknown rewrite function: 'OnlyWebRootIndexForSubdirs'")),
+        "Known rewrite function should not produce an error"
+    );
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_duplicate_values() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["OnlyWebRootIndexForSubdirs".to_string(), "OnlyWebRootIndexForSubdirs".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Duplicate rewrite function found: 'OnlyWebRootIndexForSubdirs'")),
+        "Expected error for duplicate rewrite function"
+    );
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_duplicate_and_unknown() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["OnlyWebRootIndexForSubdirs".to_string(), "OnlyWebRootIndexForSubdirs".to_string(), "AnotherUnknown".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Duplicate rewrite function found: 'OnlyWebRootIndexForSubdirs'")),
+        "Expected duplicate rewrite function error"
+    );
+    assert!(
+        errors.iter().any(|e| e.contains("Unknown rewrite function: 'AnotherUnknown'")),
+        "Expected unknown rewrite function error"
+    );
+}
+
+#[test]
+fn test_site_validation_rewrite_functions_whitespace_only() {
+    let mut site = create_valid_site();
+    site.rewrite_functions = vec!["   ".to_string()];
+
+    let result = site.validate();
+    assert!(result.is_err());
+    let errors = result.unwrap_err();
+
+    assert!(
+        errors.iter().any(|e| e.contains("Rewrite function 1 cannot be empty")),
+        "Whitespace-only rewrite function should be treated as empty"
+    );
 }
 
 #[cfg(test)]
