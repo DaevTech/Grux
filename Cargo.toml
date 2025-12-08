@@ -32,3 +32,13 @@ rustls-pki-types = "1.13.1"
 [lib]
 name = "grux"
 path = "src/lib.rs"
+
+[dev-dependencies]
+#criterion = { version = "0.8", features = ["html_reports", "cargo_bench_support"] }
+#pprof = { version = "0.15", features = ["flamegraph"] }
+hyper = { version = "1", features = ["server", "http1", "http2", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "client"] }
+
+[[bench]]
+name = "syslog_benchmark"
+harness = false

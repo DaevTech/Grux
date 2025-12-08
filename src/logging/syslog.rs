@@ -73,7 +73,7 @@ impl SysLog {
         sys_log
     }
 
-    fn calculate_enabled_levels(&mut self) {
+    pub fn calculate_enabled_levels(&mut self) {
         let log_level = self.log_level.clone();
         let stdout_log_level = self.stdout_log_level.clone();
         // Log file levels enabled
@@ -166,6 +166,11 @@ impl SysLog {
         SYS_LOG.write().unwrap().calculate_enabled_levels();
     }
 
+    pub fn set_new_stdout_log_level(new_log_level: LogType) {
+        SYS_LOG.write().unwrap().stdout_log_level = new_log_level;
+        SYS_LOG.write().unwrap().calculate_enabled_levels();
+    }
+
     fn get_log_level_based_on_operation_mode(operation_mode: OperationMode) -> LogType {
         match operation_mode {
             OperationMode::DEV => LogType::Trace,
@@ -176,7 +181,7 @@ impl SysLog {
     }
 }
 
-static SYS_LOG: LazyLock<RwLock<SysLog>> = LazyLock::new(|| RwLock::new(init_log()));
+pub static SYS_LOG: LazyLock<RwLock<SysLog>> = LazyLock::new(|| RwLock::new(init_log()));
 
 fn init_log() -> SysLog {
     // Get operation mode

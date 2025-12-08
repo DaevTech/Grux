@@ -47,6 +47,12 @@ pub fn load_command_line_args() -> ArgMatches {
                 .value_parser(clap::value_parser!(PathBuf))
                 .value_parser(validate_existing_file),
         )
+        // Just for pleasing the benchmark runner
+        .arg(
+            Arg::new("bench")
+                .long("bench")
+                .action(clap::ArgAction::SetTrue),
+        )
         .get_matches()
 }
 
