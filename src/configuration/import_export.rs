@@ -47,3 +47,31 @@ pub fn import_configuration_from_file(path: &PathBuf) -> Result<(), String> {
 
     Ok(())
 }
+
+pub fn validate_configuration_file(path: &PathBuf) -> Result<(), String> {
+    // Read file contents
+    let file_contents = std::fs::read_to_string(path).map_err(|e| format!("Failed to read configuration file {}: {}", path.display(), e))?;
+
+    // Load json into loose typed to validate version
+    let loose_typed: serde_json::Value = serde_json::from_str(&file_contents).map_err(|e| format!("Failed to parse configuration file {}: {}", path.display(), e))?;
+
+    // Check that versions match
+    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION.to_string() {
+        return Err(format!(
+            "Configuration version mismatch: expected {}, found {}",
+            crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION,
+            loose_typed["version"].as_str().unwrap_or("unknown")
+        ));
+    }
+
+    // Deserialize JSON to Configuration struct to ensure it's valid
+    let mut configuration: crate::configuration::configuration::Configuration =
+        serde_json::from_str(&file_contents).map_err(|e| format!("Failed to deserialize configuration from file {}: {}", path.display(), e))?;
+
+    // Process the binding-site relationships
+    handle_relationship_binding_sites(&configuration.binding_sites, &mut configuration.bindings, &configuration.sites);
+
+    configuration.validate().map_err(|e| format!("Configuration validation failed: {:?}", e))?;
+
+    Ok(())
+}

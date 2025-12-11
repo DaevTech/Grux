@@ -35,6 +35,13 @@ pub fn load_command_line_args() -> ArgMatches {
                 .value_parser(clap::value_parser!(PathBuf))
                 .value_parser(validate_existing_file),
         )
+        .arg(
+            Arg::new("validate-configuration")
+                .long("validate-conf")
+                .help("Validate the configuration from a file and exit")
+                .value_parser(clap::value_parser!(PathBuf))
+                .value_parser(validate_existing_file),
+        )
         .get_matches()
 }
 
@@ -77,6 +84,15 @@ pub fn check_for_command_line_actions() {
     // Check for import configuration
     if let Some(path) = cli.get_one::<PathBuf>("import-configuration") {
         crate::configuration::import_export::import_configuration_from_file(path).expect("Failed to import configuration");
+        std::process::exit(0);
+    }
+
+    // Check for validate configuration
+    if let Some(path) = cli.get_one::<PathBuf>("validate-configuration") {
+        match crate::configuration::import_export::validate_configuration_file(path) {
+            Ok(_) => println!("Configuration file is valid: {}", path.display()),
+            Err(e) => eprintln!("Error validating configuration file: {}", e),
+        }
         std::process::exit(0);
     }
 }

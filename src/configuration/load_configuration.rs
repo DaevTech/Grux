@@ -79,14 +79,18 @@ pub fn fetch_configuration_in_db() -> Result<Configuration, String> {
     // Process the binding-site relationships
     handle_relationship_binding_sites(&binding_sites, &mut bindings, &sites);
 
-    Ok(Configuration {
+    // Do a sanitize, in case there are any invalid entries in the database
+    let mut configuration = Configuration {
         version: CURRENT_CONFIGURATION_VERSION.to_string(),
         bindings,
         sites,
         binding_sites,
         core,
         request_handlers,
-    })
+    };
+    configuration.sanitize();
+
+    Ok(configuration)
 }
 
 pub fn handle_relationship_binding_sites(relationships: &Vec<BindingSiteRelationship>, bindings: &mut Vec<Binding>, sites: &Vec<Site>) {
