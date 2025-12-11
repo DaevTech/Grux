@@ -22,6 +22,10 @@ impl Binding {
         self.sites.push(site);
     }
 
+    pub fn sanitize(&mut self) {
+
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 

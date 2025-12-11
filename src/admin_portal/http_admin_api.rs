@@ -280,9 +280,23 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
     match save_configuration(&mut configuration) {
         Ok(true) => {
             info("Configuration updated successfully".to_string());
+
+            // Serialize the sanitized configuration to return to the client
+            let config_json = match serde_json::to_value(&configuration) {
+                Ok(json) => json,
+                Err(e) => {
+                    error(format!("Failed to serialize updated configuration: {}", e));
+                    let mut resp = Response::new(full(r#"{"error": "Configuration saved but failed to serialize response"}"#));
+                    *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
+                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+                    return Ok(resp);
+                }
+            };
+
             let success_response = serde_json::json!({
                 "success": true,
-                "message": "Configuration updated successfully. Please restart the server for changes to take effect."
+                "message": "Configuration updated successfully. Please restart the server for changes to take effect.",
+                "configuration": config_json
             });
             let mut resp = Response::new(full(success_response.to_string()));
             *resp.status_mut() = hyper::StatusCode::OK;
@@ -291,9 +305,23 @@ pub async fn admin_post_configuration_endpoint(req: Request<hyper::body::Incomin
         }
         Ok(false) => {
             info("Configuration save requested, but no changes detected".to_string());
+
+            // Even if no changes were made, return the current configuration
+            let config_json = match serde_json::to_value(&configuration) {
+                Ok(json) => json,
+                Err(e) => {
+                    error(format!("Failed to serialize configuration: {}", e));
+                    let mut resp = Response::new(full(r#"{"error": "Failed to serialize configuration response"}"#));
+                    *resp.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
+                    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+                    return Ok(resp);
+                }
+            };
+
             let success_response = serde_json::json!({
                 "success": true,
-                "message": "Configuration is up to date. No changes were needed."
+                "message": "Configuration is up to date. No changes were needed.",
+                "configuration": config_json
             });
             let mut resp = Response::new(full(success_response.to_string()));
             *resp.status_mut() = hyper::StatusCode::OK;

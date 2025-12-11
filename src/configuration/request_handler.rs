@@ -17,6 +17,53 @@ pub struct RequestHandler {
 }
 
 impl RequestHandler {
+    pub fn sanitize(&mut self) {
+        // Trim and clean ID
+        self.id = self.id.trim().to_string();
+
+        // Trim and clean name
+        self.name = self.name.trim().to_string();
+
+        // Trim and lowercase handler type
+        self.handler_type = self.handler_type.trim().to_lowercase();
+
+        // Trim executable path
+        self.executable = self.executable.trim().to_string();
+
+        // Trim IP and port
+        self.ip_and_port = self.ip_and_port.trim().to_string();
+
+        // Trim other webroot
+        self.other_webroot = self.other_webroot.trim().to_string();
+
+        // Clean file match patterns: trim, remove empty, ensure proper prefix
+        self.file_match = self.file_match.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+
+        // Clean extra handler config: trim keys and values, remove empty pairs
+        self.extra_handler_config = self
+            .extra_handler_config
+            .iter()
+            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+            .filter(|(k, v)| !k.is_empty() && !v.is_empty())
+            .collect();
+
+        // Clean extra environment: trim keys and values, uppercase keys, remove empty pairs
+        self.extra_environment = self
+            .extra_environment
+            .iter()
+            .map(|(k, v)| (k.trim().to_uppercase(), v.trim().to_string()))
+            .filter(|(k, v)| !k.is_empty() && !v.is_empty())
+            .collect();
+
+        if self.request_timeout > 3600 {
+            self.request_timeout = 3600; // Cap at 1 hour
+        }
+
+        if self.concurrent_threads > 1000 {
+            self.concurrent_threads = 1000; // Cap at 1000
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
@@ -135,9 +182,6 @@ impl RequestHandler {
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 }
-
-
-
 
 #[test]
 fn test_request_handler_validation_valid() {

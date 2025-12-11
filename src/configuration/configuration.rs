@@ -66,7 +66,6 @@ impl Configuration {
                         "*.php".to_string(),
                     ],
                     whitelisted_file_patterns: vec!["*/.well-known/*".to_string()],
-                    operation_mode: "PRODUCTION".to_string(),
                 },
             },
             request_handlers: vec![],
@@ -75,14 +74,14 @@ impl Configuration {
 
     // Sanitize the configuration before use
     pub fn sanitize(&mut self) {
-        // Sanitize sites
-        for site in &mut self.sites {
-            site.sanitize();
-        }
-        /*
         // Sanitize bindings
         for binding in &mut self.bindings {
             binding.sanitize();
+        }
+
+        // Sanitize sites
+        for site in &mut self.sites {
+            site.sanitize();
         }
 
         // Sanitize core settings
@@ -92,7 +91,6 @@ impl Configuration {
         for handler in &mut self.request_handlers {
             handler.sanitize();
         }
-        */
     }
 
     // Validates the entire configuration

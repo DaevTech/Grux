@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
 use crate::configuration::file_cache::FileCache;
 use crate::configuration::gzip::Gzip;
 use crate::configuration::server_settings::ServerSettings;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Core {
@@ -11,6 +11,12 @@ pub struct Core {
 }
 
 impl Core {
+    pub fn sanitize(&mut self) {
+        self.file_cache.sanitize();
+        self.gzip.sanitize();
+        self.server_settings.sanitize();
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 

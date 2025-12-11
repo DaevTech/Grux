@@ -100,7 +100,6 @@ fn save_core_config(connection: &Connection, core: &Core) -> Result<(), String> 
     // Save server settings
     save_server_settings(connection, "max_body_size", &core.server_settings.max_body_size.to_string())?;
     save_server_settings(connection, "blocked_file_patterns", &core.server_settings.blocked_file_patterns.join(","))?;
-    save_server_settings(connection, "operation_mode", &core.server_settings.operation_mode)?;
 
     Ok(())
 }

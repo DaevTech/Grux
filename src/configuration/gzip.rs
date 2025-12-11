@@ -7,6 +7,11 @@ pub struct Gzip {
 }
 
 impl Gzip {
+    pub fn sanitize(&mut self) {
+        // Clean compressible_content_types: trim, remove empty
+        self.compressible_content_types = self.compressible_content_types.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    }
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 

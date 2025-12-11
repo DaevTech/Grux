@@ -12,6 +12,8 @@ pub struct FileCache {
 }
 
 impl FileCache {
+    pub fn sanitize(&mut self) {}
+
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 

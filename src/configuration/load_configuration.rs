@@ -152,9 +152,6 @@ fn load_core_config(connection: &Connection) -> Result<Core, String> {
             "blocked_file_patterns" => {
                 core.server_settings.blocked_file_patterns = parse_comma_separated_list(&value);
             }
-            "operation_mode" => {
-                core.server_settings.operation_mode = value;
-            }
             _ => continue,
         }
     }

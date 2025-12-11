@@ -151,7 +151,14 @@ const saveConfiguration = async () => {
         const responseData = await response.json();
 
         if (response.ok) {
-            originalConfig.value = JSON.parse(JSON.stringify(config.value)); // Update original
+            // Apply the sanitized configuration returned from the server
+            if (responseData.configuration) {
+                config.value = responseData.configuration;
+                originalConfig.value = JSON.parse(JSON.stringify(responseData.configuration));
+            } else {
+                // Fallback: if no configuration returned, keep current as original
+                originalConfig.value = JSON.parse(JSON.stringify(config.value));
+            }
             successMessage.value = responseData.message || 'Configuration saved successfully!';
             saveError.value = ''; // Clear any previous save errors
             setTimeout(() => {
