@@ -1,4 +1,3 @@
-use std::time::Duration;
 use crate::{
     configuration::site::Site,
     core::running_state_manager,
@@ -15,6 +14,7 @@ use hyper::Response;
 use hyper_util::rt::TokioIo;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,6 +34,9 @@ pub struct ProxyProcessor {
     pub timeout_seconds: u16,                        // Timeout for upstream requests, in seconds
     pub health_check_path: String,                   // Path to use for health checks
     pub url_rewrites: Vec<ProxyProcessorUrlRewrite>, // URL rewrite rules - Rewrites on entire URL
+    // Host header handling
+    pub should_rewrite_host_header: bool, // Whether to rewrite the Host header to match the upstream server
+    pub forced_host_header: String,       // If set, this host header will be used instead of the original request's Host header
 }
 
 impl ProxyProcessor {
@@ -46,6 +49,8 @@ impl ProxyProcessor {
             timeout_seconds: 30,
             health_check_path: "/health".to_string(),
             url_rewrites: Vec::new(),
+            should_rewrite_host_header: false,
+            forced_host_header: "".to_string(),
         }
     }
 
@@ -90,6 +95,51 @@ impl ProxyProcessor {
         }
 
         result
+    }
+
+    fn clean_update_response_headers(grux_request: &mut GruxRequest, response: &mut Response<hyper::body::Incoming>, is_websocket_upgrade: bool) {
+        // Remove hop-by-hop headers as per RFC 2616 Section 13.5.1
+        let hop_by_hop_headers = [
+            "Keep-Alive",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailers",
+            "Transfer-Encoding",
+        ];
+
+        if !is_websocket_upgrade {
+            // Also remove Connection and Upgrade headers if not a websocket upgrade
+            response.headers_mut().remove("Connection");
+            response.headers_mut().remove("Upgrade");
+        }
+
+        for header in &hop_by_hop_headers {
+            response.headers_mut().remove(*header);
+        }
+
+        // Fill out the X-Forwarded- headers
+        let headers = response.headers_mut();
+
+        // X-Forwarded-For
+        if let Some(remote_ip) = grux_request.get_calculated_data("remote_ip") {
+            let x_forwarded_for = headers.get("X-Forwarded-For").and_then(|val| val.to_str().ok()).unwrap_or("");
+            let new_x_forwarded_for = if x_forwarded_for.is_empty() { remote_ip } else { format!("{}, {}", x_forwarded_for, remote_ip) };
+            headers.insert("X-Forwarded-For", hyper::header::HeaderValue::from_str(&new_x_forwarded_for).unwrap());
+        }
+
+        // X-Forwarded-Host
+        let x_forwarded_host = headers.get("X-Forwarded-Host").and_then(|val| val.to_str().ok()).unwrap_or("");
+        if x_forwarded_host.is_empty() {
+            headers.insert("X-Forwarded-Host", hyper::header::HeaderValue::from_str(&grux_request.get_hostname()).unwrap());
+        }
+
+        // X-Forwarded-Proto
+        let x_forwarded_proto = headers.get("X-Forwarded-Proto").and_then(|val| val.to_str().ok()).unwrap_or("");
+        if x_forwarded_proto.is_empty() {
+            let scheme = grux_request.get_scheme();
+            headers.insert("X-Forwarded-Proto", hyper::header::HeaderValue::from_str(&scheme).unwrap());
+        }
     }
 }
 
@@ -186,11 +236,31 @@ impl ProcessorTrait for ProxyProcessor {
         // Apply any URL rewrites, including if host needs to be changed, or port or whatever
         let rewritten_url = self.apply_url_rewrites(&new_uri);
         grux_request.set_new_uri(&rewritten_url);
-        let client = Client::builder(TokioExecutor::new()).pool_idle_timeout(Duration::from_secs(30)).build_http();
 
-        // Get the client-side upgrade
+        // Check if we need to rewrite the Host header
+        if self.should_rewrite_host_header {
+            let host_header_value = if !self.forced_host_header.is_empty() {
+                // If it is set by configuration, use that
+                self.forced_host_header.clone()
+            } else {
+                // Extract host from the upstream server URL
+                let uri_struct = grux_request.get_uri_struct();
+                let host = uri_struct.host().unwrap_or("");
+                let port = uri_struct.port_u16().unwrap_or(80);
+                format!("{}:{}", host, port)
+            };
+            if !host_header_value.is_empty() {
+                grux_request.set_new_hostname(&host_header_value);
+            }
+        }
+
+        // Create the HTTP client
+        let client = Client::builder(TokioExecutor::new()).pool_idle_timeout(Duration::from_secs(15)).build_http();
+
+        // Get the client-side upgrade on the request side
         let client_upgrade = grux_request.take_upgrade();
 
+        // Fetch a http::request from the GruxRequest, which contains the streaming body and can be sent directly
         let proxy_request = match grux_request.get_streaming_http_request() {
             Ok(req) => req,
             Err(_) => {
@@ -204,6 +274,7 @@ impl ProcessorTrait for ProxyProcessor {
         match client.request(proxy_request).await {
             Ok(mut resp) => {
                 // Check if this is a protocol upgrade
+                let mut is_websocket_upgrade = false;
                 if resp.status() == hyper::StatusCode::SWITCHING_PROTOCOLS {
                     trace("Detected WebSocket/protocol upgrade (HTTP 101)");
 
@@ -233,8 +304,12 @@ impl ProcessorTrait for ProxyProcessor {
                                 }
                             }
                         });
+                        is_websocket_upgrade = true;
                     }
                 }
+
+                // In the response, we make sure to update/clean the headers as needed
+                Self::clean_update_response_headers(grux_request, &mut resp, is_websocket_upgrade);
 
                 return Ok(resp.map(|body| body.boxed()));
             }

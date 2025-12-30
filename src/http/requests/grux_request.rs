@@ -110,6 +110,19 @@ impl GruxRequest {
         requested_hostname
     }
 
+    pub fn get_scheme(&mut self) -> String {
+        if let Some(scheme) = self.calculated_data.get("scheme") {
+            return scheme.to_string();
+        }
+        let scheme = if let Some(scheme_str) = self.parts.uri.scheme_str() {
+            scheme_str.to_string()
+        } else {
+            "http".to_string()
+        };
+        self.add_calculated_data("scheme", &scheme);
+        scheme
+    }
+
     pub fn get_http_version(&mut self) -> String {
         if let Some(http_version) = self.calculated_data.get("http_version") {
             return http_version.to_string();
@@ -142,6 +155,10 @@ impl GruxRequest {
         let uri = self.parts.uri.to_string();
         self.add_calculated_data("uri", &uri);
         uri
+    }
+
+    pub fn get_uri_struct(&self) -> &http::Uri {
+        &self.parts.uri
     }
 
     pub fn get_path(&mut self) -> String {
@@ -254,5 +271,13 @@ impl GruxRequest {
         let uri = new_uri.parse().unwrap_or(self.parts.uri.clone());
         self.parts.uri = uri;
         self.add_calculated_data("uri", new_uri);
+    }
+
+    pub fn set_new_hostname(&mut self, new_hostname: &str) {
+        self.parts.headers.insert(
+            "Host",
+            hyper::header::HeaderValue::from_str(new_hostname).unwrap_or(hyper::header::HeaderValue::from_static("")),
+        );
+        self.add_calculated_data("hostname", new_hostname);
     }
 }
