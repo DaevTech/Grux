@@ -6,6 +6,7 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio::time::{self, Duration};
 
 use crate::core::running_state_manager;
+use crate::core::triggers::get_trigger_handler;
 use crate::logging::syslog::{debug, error};
 
 // Commands sent to a load balancer task
@@ -39,7 +40,12 @@ pub trait LoadBalancerImpl: Send + 'static {
             let resp = tokio::time::timeout(Duration::from_secs(request_timeout_secs), client.get(server_uri.clone())).await;
             let elapsed = start_time.elapsed().as_secs_f32();
             let is_healthy = resp.ok().and_then(|r| r.ok()).map(|r| r.status().is_success()).unwrap_or(false);
-            debug(format!("Health check for server '{}': {} - Request was done in {:.3} seconds", server_uri, if is_healthy { "Healthy" } else { "Unhealthy" }, elapsed));
+            debug(format!(
+                "Health check for server '{}': {} - Request was done in {:.3} seconds",
+                server_uri,
+                if is_healthy { "Healthy" } else { "Unhealthy" },
+                elapsed
+            ));
             health_register.store(is_healthy, Ordering::SeqCst);
         });
     }
@@ -49,6 +55,11 @@ pub trait LoadBalancerImpl: Send + 'static {
 // Actor task that owns a single load balancer instance
 async fn load_balancer_task<T: LoadBalancerImpl>(mut lb: T, mut rx: mpsc::Receiver<LoadBalancerCommand>) {
     let mut interval = time::interval(Duration::from_secs(lb.get_health_check_interval_secs()));
+
+    // Get a token for shutdown
+    let triggers = get_trigger_handler();
+    let shutdown_token = triggers.get_trigger("shutdown").expect("Failed to get shutdown trigger").read().await.clone();
+    let stop_services_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
 
     loop {
         tokio::select! {
@@ -65,6 +76,8 @@ async fn load_balancer_task<T: LoadBalancerImpl>(mut lb: T, mut rx: mpsc::Receiv
                     }
                 }
             }
+            _ = shutdown_token.cancelled() => break,
+            _ = stop_services_token.cancelled() => break,
             else => break,
         }
     }

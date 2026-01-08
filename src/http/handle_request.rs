@@ -51,26 +51,6 @@ pub async fn handle_request(mut grux_request: GruxRequest, binding: Binding, shu
         return Ok(response);
     }
 
-    // Check if the request is for the admin portal - handle these first
-    if binding.is_admin {
-        match handle_api_routes(&mut grux_request, site).await {
-            Ok(response) => {
-                return Ok(response);
-            }
-            Err(e) => {
-                // If the error is NoRouteMatched, we continue to normal processing
-                match e.kind {
-                    GruxErrorKind::AdminApi(AdminApiError::NoRouteMatched) => {
-                        trace("No matching admin API route found, continuing to normal request handling".to_string());
-                    }
-                    _ => {
-                        // Current no other admin API errors are defined, but in case we add some later, we handle them here
-                    }
-                }
-            }
-        }
-    }
-
     // Handle special case for OPTIONS * request, which is stupid but valid
     if grux_request.get_http_method() == "OPTIONS" && grux_request.get_path() == "*" {
         // Special case for OPTIONS * request
@@ -81,8 +61,6 @@ pub async fn handle_request(mut grux_request: GruxRequest, binding: Binding, shu
         return Ok(resp);
     }
 
-    /* DOES NOT CURRENTLY WORK DUE TO HYPER BUG
-
     // Handle EXPECT: 100-continue header
     if let Some(expect_header) = grux_request.get_headers().get("expect") {
         if expect_header.to_str().unwrap_or("").eq_ignore_ascii_case("100-continue") {
@@ -92,25 +70,48 @@ pub async fn handle_request(mut grux_request: GruxRequest, binding: Binding, shu
             return Ok(resp);
         }
     }
-     */
 
-    // Now we check the request handlers to see if any of them want to handle this request
-    // If no handler wants it, we return 404
-    if site.request_handlers.is_empty() {
-        return Ok(GruxResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
-    }
+    // Check if the request is for the admin portal - handle these first
+    let admin_response = if binding.is_admin {
+        match handle_api_routes(&mut grux_request, site).await {
+            Ok(response) => Some(response),
+            Err(e) => {
+                // If the error is NoRouteMatched, we continue to normal processing
+                match e.kind {
+                    GruxErrorKind::AdminApi(AdminApiError::NoRouteMatched) => {
+                        trace("No matching admin API route found, continuing to normal request handling".to_string());
+                    }
+                    _ => {
+                        // Current no other admin API errors are defined, but in case we add some later, we handle them here
+                    }
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Get the running state
     let running_state = get_running_state_manager().await.get_running_state_unlocked().await;
 
-    // Now we let the request handler manager process the request, with the request handlers in order of priority, which should already be sorted
-    let request_handler_manager = running_state.get_request_handler_manager();
-    let response_result = request_handler_manager.handle_request(&mut grux_request, &site).await;
-    if response_result.is_err() {
-        trace(format!("No request handler matched for URL path: {}", &grux_request.get_path_and_query()));
-        return Ok(GruxResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
-    }
-    let mut response = response_result.unwrap();
+    let mut response = if let Some(admin_response) = admin_response {
+        admin_response
+    } else {
+        // If no handler wants it, we return 404
+        if site.request_handlers.is_empty() {
+            return Ok(GruxResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
+        }
+
+        // Now we let the request handler manager process the request in the order defined by the site's request_handlers list.
+        let request_handler_manager = running_state.get_request_handler_manager();
+        let response_result = request_handler_manager.handle_request(&mut grux_request, &site).await;
+        if response_result.is_err() {
+            trace(format!("No request handler matched for URL path: {}", &grux_request.get_path_and_query()));
+            return Ok(GruxResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
+        }
+        response_result.unwrap()
+    };
 
     // If this is kept alive and we have shut down, we need to inform the client we are shutting down
     if shutdown_token.is_cancelled() || stop_services_token.is_cancelled() {

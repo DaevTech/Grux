@@ -12,7 +12,7 @@ pub fn load_command_line_args() -> ArgMatches {
                 .short('o')
                 .long("opmode")
                 .help("Mode of operation")
-                .value_parser(["DEV", "DEBUG", "PRODUCTION", "SPEEDTEST"]),
+                .value_parser(["DEV", "DEBUG", "PRODUCTION", "ULTIMATE"]),
         )
         .arg(
             Arg::new("reset-admin-password")

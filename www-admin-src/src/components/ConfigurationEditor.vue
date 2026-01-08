@@ -23,7 +23,8 @@ const rewriteFunctionOptions = ['OnlyWebRootIndexForSubdirs'];
 const isLoading = ref(false);
 const isSaving = ref(false);
 const error = ref('');
-const saveError = ref('');
+const saveErrorMessage = ref('');
+const saveErrors = ref([]);
 const successMessage = ref('');
 const originalConfig = ref(null);
 const config = ref(null);
@@ -32,7 +33,7 @@ const config = ref(null);
 const expandedSections = reactive({
     bindings: false,
     sites: false,
-    externalRequestHandlers: false,
+    managedExternalSystems: false,
     core: false,
 });
 
@@ -42,7 +43,7 @@ const expandedItems = reactive({
     sites: {},
     siteProcessors: {},
     siteSubsections: {},
-    externalRequestHandlers: {},
+    phpCgiHandlers: {},
     coreSubsections: {
         fileCache: false,
         gzip: false,
@@ -135,7 +136,8 @@ const confirmReloadConfiguration = async () => {
 // Save configuration
 const saveConfiguration = async () => {
     isSaving.value = true;
-    saveError.value = '';
+    saveErrorMessage.value = '';
+    saveErrors.value = [];
     successMessage.value = '';
 
     try {
@@ -148,7 +150,7 @@ const saveConfiguration = async () => {
             body: JSON.stringify(config.value),
         });
 
-        const responseData = await response.json();
+        const responseData = await response.json().catch(() => ({}));
 
         if (response.ok) {
             // Apply the sanitized configuration returned from the server
@@ -160,7 +162,8 @@ const saveConfiguration = async () => {
                 originalConfig.value = JSON.parse(JSON.stringify(config.value));
             }
             successMessage.value = responseData.message || 'Configuration saved successfully!';
-            saveError.value = ''; // Clear any previous save errors
+            saveErrorMessage.value = ''; // Clear any previous save errors
+            saveErrors.value = [];
             setTimeout(() => {
                 successMessage.value = '';
             }, 10000); // Show for 10 seconds since restart might be required
@@ -168,22 +171,17 @@ const saveConfiguration = async () => {
             // Handle different types of errors - DON'T reset config, keep user's changes
             if (response.status === 400) {
                 // Validation error
-                if (responseData.details && typeof responseData.details === 'string') {
-                    // Single error message
-                    saveError.value = `${responseData.details}`;
-                } else if (responseData.details && Array.isArray(responseData.details)) {
-                    // Multiple validation errors - format as bullet list
-                    saveError.value = `Configuration validation failed:\n• ${responseData.details
-                        .split(';')
-                        .map((err) => err.trim())
-                        .join('\n• ')}`;
-                } else {
-                    saveError.value = responseData.error || 'Configuration validation failed';
-                }
+                const rawErrors = responseData?.errors;
+                const normalizedErrors = Array.isArray(rawErrors) ? rawErrors : typeof rawErrors === 'string' ? [rawErrors] : [];
+
+                saveErrors.value = normalizedErrors.map((err) => String(err).trim()).filter((err) => err.length > 0);
+
+                // Prefer the top-level message; fall back to the first error string.
+                saveErrorMessage.value = responseData?.error || saveErrors.value[0] || 'Configuration validation failed';
             } else if (response.status === 401) {
-                saveError.value = 'Authentication required. Please log in again.';
+                saveErrorMessage.value = 'Authentication required. Please log in again.';
             } else {
-                saveError.value = responseData.error || 'Failed to save configuration';
+                saveErrorMessage.value = responseData?.error || 'Failed to save configuration';
             }
             successMessage.value = ''; // Clear success message if there's an error
         }
@@ -191,9 +189,9 @@ const saveConfiguration = async () => {
         console.error('Config saving error:', err);
         successMessage.value = ''; // Clear success message if there's an error
         if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
-            saveError.value = 'Network error: Unable to connect to server';
+            saveErrorMessage.value = 'Network error: Unable to connect to server';
         } else {
-            saveError.value = 'Network error while saving configuration';
+            saveErrorMessage.value = 'Network error while saving configuration';
         }
     } finally {
         isSaving.value = false;
@@ -227,11 +225,11 @@ const toggleSite = (siteIndex) => {
     expandedItems.sites[siteIndex] = !expandedItems.sites[siteIndex];
 };
 
-const toggleExternalRequestHandler = (handlerIndex) => {
-    if (!expandedItems.externalRequestHandlers[handlerIndex]) {
-        expandedItems.externalRequestHandlers[handlerIndex] = false;
+const togglePhpCgiHandler = (handlerIndex) => {
+    if (!expandedItems.phpCgiHandlers[handlerIndex]) {
+        expandedItems.phpCgiHandlers[handlerIndex] = false;
     }
-    expandedItems.externalRequestHandlers[handlerIndex] = !expandedItems.externalRequestHandlers[handlerIndex];
+    expandedItems.phpCgiHandlers[handlerIndex] = !expandedItems.phpCgiHandlers[handlerIndex];
 };
 
 const toggleSiteProcessor = (siteIndex, processorIndex) => {
@@ -251,8 +249,8 @@ const isSiteExpanded = (siteIndex) => {
     return expandedItems.sites[siteIndex] || false;
 };
 
-const isExternalRequestHandlerExpanded = (handlerIndex) => {
-    return expandedItems.externalRequestHandlers[handlerIndex] || false;
+const isPhpCgiHandlerExpanded = (handlerIndex) => {
+    return expandedItems.phpCgiHandlers[handlerIndex] || false;
 };
 
 const isSiteProcessorExpanded = (siteIndex, processorIndex) => {
@@ -283,18 +281,94 @@ const isCoreSubsectionExpanded = (subsection) => {
     return expandedItems.coreSubsections[subsection] || false;
 };
 
+const normalizeSiteRequestHandlersOrder = (siteIndex) => {
+    if (!config.value?.sites?.[siteIndex]) return;
+
+    const site = config.value.sites[siteIndex];
+    if (!Array.isArray(site.request_handlers) || site.request_handlers.length === 0) return;
+    if (!Array.isArray(config.value.request_handlers)) return;
+
+    const handlerById = new Map(config.value.request_handlers.map((h) => [h.id, h]));
+
+    const uniquePreserveOrder = (items) => {
+        const seen = new Set();
+        const out = [];
+        for (const item of items) {
+            if (seen.has(item)) continue;
+            seen.add(item);
+            out.push(item);
+        }
+        return out;
+    };
+
+    const ids = site.request_handlers.filter((id) => id !== null && id !== undefined && String(id).length > 0);
+    const knownIds = uniquePreserveOrder(ids.filter((id) => handlerById.has(id)));
+    const unknownIds = uniquePreserveOrder(ids.filter((id) => !handlerById.has(id)));
+
+    // Ordering is now defined solely by the order of handler IDs on the site.
+    site.request_handlers = [...knownIds, ...unknownIds];
+};
+
+const moveProcessorOrder = (siteIndex, requestHandlerId, direction) => {
+    if (!config.value?.sites?.[siteIndex]) return;
+    const site = config.value.sites[siteIndex];
+    if (!Array.isArray(site.request_handlers) || site.request_handlers.length === 0) return;
+    if (!Array.isArray(config.value.request_handlers)) return;
+
+    normalizeSiteRequestHandlersOrder(siteIndex);
+
+    const handlerIdSet = new Set(config.value.request_handlers.map((h) => h.id));
+    const currentIndex = site.request_handlers.findIndex((id) => id === requestHandlerId);
+    if (currentIndex === -1) return;
+
+    const step = direction === 'up' ? -1 : 1;
+    let targetIndex = currentIndex + step;
+    while (targetIndex >= 0 && targetIndex < site.request_handlers.length && !handlerIdSet.has(site.request_handlers[targetIndex])) {
+        targetIndex += step;
+    }
+    if (targetIndex < 0 || targetIndex >= site.request_handlers.length) return;
+
+    const tmp = site.request_handlers[currentIndex];
+    site.request_handlers[currentIndex] = site.request_handlers[targetIndex];
+    site.request_handlers[targetIndex] = tmp;
+};
+
 // Get processors for a site by looking up request handlers
 const getSiteProcessors = (siteIndex) => {
     if (!config.value || !config.value.sites || !config.value.sites[siteIndex]) {
         return [];
     }
+
     const site = config.value.sites[siteIndex];
     if (!site.request_handlers || !config.value.request_handlers) {
         return [];
     }
 
-    // Map request handler IDs to actual request handler objects
-    return site.request_handlers.map((handlerId) => config.value.request_handlers.find((h) => h.id === handlerId)).filter((handler) => handler !== undefined);
+    // Order is defined by the site.request_handlers array.
+    const resolvedHandlers = site.request_handlers.map((handlerId) => config.value.request_handlers.find((h) => h.id === handlerId)).filter((handler) => handler !== undefined);
+
+    return resolvedHandlers;
+};
+
+// View-model for template binding: includes the handler plus a reference to its processor config object.
+// This avoids v-model needing to write through a lookup function (which Vue won't allow).
+const getSiteProcessorModels = (siteIndex) => {
+    const handlers = getSiteProcessors(siteIndex);
+    return handlers.map((handler) => {
+        const processorType = handler.processor_type;
+        const processorId = handler.processor_id;
+
+        const staticConfig = processorType === 'static' ? config.value?.static_file_processors?.find((p) => p.id === processorId) : null;
+        const phpConfig = processorType === 'php' ? config.value?.php_processors?.find((p) => p.id === processorId) : null;
+        const proxyConfig = processorType === 'proxy' ? config.value?.proxy_processors?.find((p) => p.id === processorId) : null;
+
+        return {
+            handler,
+            static_config: staticConfig,
+            php_config: phpConfig,
+            proxy_config: proxyConfig,
+        };
+    });
 };
 
 // Add new binding
@@ -362,47 +436,35 @@ const removeSite = (index) => {
     }
 };
 
-// Add new external request handler
-const addExternalRequestHandler = () => {
-    if (!config.value.request_handlers) {
-        config.value.request_handlers = [];
+// ========== Managed External Systems (PHP-CGI) ==========
+
+const addPhpCgiHandler = () => {
+    if (!config.value.php_cgi_handlers) {
+        config.value.php_cgi_handlers = [];
     }
 
-    // Generate a unique ID using crypto.randomUUID()
     const newId = crypto.randomUUID();
-
-    config.value.request_handlers.push({
+    config.value.php_cgi_handlers.push({
         id: newId,
-        is_enabled: true,
-        name: 'New External Handler',
-        handler_type: 'php',
+        name: 'PHP X.Y.Z Handler',
         request_timeout: 30,
         concurrent_threads: 0,
         executable: '',
-        ip_and_port: '',
-        other_webroot: '',
-        extra_handler_config: [],
-        extra_environment: [],
     });
 };
 
-// Remove external request handler
-const removeExternalRequestHandler = (index) => {
-    if (config.value.request_handlers && config.value.request_handlers.length > index) {
-        const handlerId = config.value.request_handlers[index].id;
-        config.value.request_handlers.splice(index, 1);
+const removePhpCgiHandler = (index) => {
+    if (!config.value.php_cgi_handlers || config.value.php_cgi_handlers.length <= index) return;
 
-        // Remove handler ID from all site processors that reference it
-        if (config.value.sites) {
-            config.value.sites.forEach((site) => {
-                if (site.processors) {
-                    site.processors.forEach((processor) => {
-                        if (processor.type === 'php' && processor.external_handler_id === handlerId) {
-                            processor.external_handler_id = '';
-                        }
-                    });
-                }
-            });
+    const removedId = config.value.php_cgi_handlers[index].id;
+    config.value.php_cgi_handlers.splice(index, 1);
+
+    // Clear references from PHP processors that used this managed handler.
+    if (Array.isArray(config.value.php_processors)) {
+        for (const processor of config.value.php_processors) {
+            if (processor.served_by_type === 'win-php-cgi' && processor.php_cgi_handler_id === removedId) {
+                processor.php_cgi_handler_id = '';
+            }
         }
     }
 };
@@ -534,31 +596,6 @@ const removeGzipContentType = (index) => {
     }
 };
 
-// External request handler helper functions
-const addHandlerConfig = (handlerIndex) => {
-    if (config.value.request_handlers && config.value.request_handlers[handlerIndex]) {
-        config.value.request_handlers[handlerIndex].extra_handler_config.push(['key', 'value']);
-    }
-};
-
-const removeHandlerConfig = (handlerIndex, configIndex) => {
-    if (config.value.request_handlers && config.value.request_handlers[handlerIndex] && config.value.request_handlers[handlerIndex].extra_handler_config.length > configIndex) {
-        config.value.request_handlers[handlerIndex].extra_handler_config.splice(configIndex, 1);
-    }
-};
-
-const addEnvironmentVar = (handlerIndex) => {
-    if (config.value.request_handlers && config.value.request_handlers[handlerIndex]) {
-        config.value.request_handlers[handlerIndex].extra_environment.push(['ENV_VAR', 'value']);
-    }
-};
-
-const removeEnvironmentVar = (handlerIndex, envIndex) => {
-    if (config.value.request_handlers && config.value.request_handlers[handlerIndex] && config.value.request_handlers[handlerIndex].extra_environment.length > envIndex) {
-        config.value.request_handlers[handlerIndex].extra_environment.splice(envIndex, 1);
-    }
-};
-
 // ========== Site Processor Management Functions ==========
 
 // Add processor to site
@@ -595,7 +632,12 @@ const addProcessorToSite = (siteIndex, processorType) => {
         }
         newProcessor = {
             id: processorId,
-            handler_address: '',
+            served_by_type: 'php-fpm',
+            php_cgi_handler_id: '',
+            fastcgi_ip_and_port: '',
+            request_timeout: 30,
+            local_web_root: '',
+            fastcgi_web_root: '',
         };
         config.value.php_processors.push(newProcessor);
     } else if (processorType === 'proxy') {
@@ -604,7 +646,17 @@ const addProcessorToSite = (siteIndex, processorType) => {
         }
         newProcessor = {
             id: processorId,
-            target_url: 'http://localhost:8080',
+            proxy_type: 'http',
+            upstream_servers: [],
+            load_balancing_strategy: 'round_robin',
+            timeout_seconds: 30,
+            health_check_path: '/health',
+            health_check_interval_seconds: 60,
+            health_check_timeout_seconds: 5,
+            url_rewrites: [],
+            preserve_host_header: false,
+            forced_host_header: '',
+            verify_tls_certificates: true,
         };
         config.value.proxy_processors.push(newProcessor);
     }
@@ -615,7 +667,6 @@ const addProcessorToSite = (siteIndex, processorType) => {
         id: requestHandlerId,
         is_enabled: true,
         name: `${processorType.charAt(0).toUpperCase() + processorType.slice(1)} Processor`,
-        priority: 1,
         processor_type: processorType,
         processor_id: processorId,
         url_match: ['*'],
@@ -623,6 +674,8 @@ const addProcessorToSite = (siteIndex, processorType) => {
 
     config.value.request_handlers.push(newRequestHandler);
     site.request_handlers.push(requestHandlerId);
+
+    normalizeSiteRequestHandlersOrder(siteIndex);
 };
 
 // Remove processor from site
@@ -702,16 +755,6 @@ const removeIndexFileFromProcessor = (siteIndex, processorIndex, fileIndex) => {
     }
 };
 
-// Get available external request handlers for PHP processor
-const getAvailableExternalHandlers = () => {
-    return (
-        config.value.request_handlers?.map((h) => ({
-            id: h.id,
-            label: `${h.name} (${h.handler_type})`,
-        })) || []
-    );
-};
-
 // MB to bytes conversion for file cache
 const bytesToMb = (bytes) => {
     return Math.round((bytes / (1024 * 1024)) * 100) / 100; // Round to 2 decimal places
@@ -774,13 +817,15 @@ onMounted(() => {
         <!-- Main Content -->
         <div v-else-if="config" class="config-form">
             <!-- Save Error message (validation/save errors) -->
-            <div v-if="saveError" class="save-error-message">
+            <div v-if="saveErrorMessage || (saveErrors && saveErrors.length > 0)" class="save-error-message">
                 <div class="error-header">
                     <span class="error-icon">⚠️</span>
                     <strong>Configuration Save Failed</strong>
                 </div>
-                <pre v-if="saveError.includes('\\n')" class="error-details">{{ saveError }}</pre>
-                <span v-else>{{ saveError }}</span>
+
+                <ul v-if="saveErrors && saveErrors.length > 0" class="save-error-list">
+                    <li v-for="(err, idx) in saveErrors" :key="idx">{{ err }}</li>
+                </ul>
                 <p class="error-help">Please fix the errors above and try saving again.</p>
             </div>
 
@@ -845,23 +890,32 @@ onMounted(() => {
                         <!-- Binding Content -->
                         <div v-if="isBindingExpanded(bindingIndex)" class="item-content">
                             <div class="form-grid compact">
-                                <div class="form-field small-field">
-                                    <label>IP Address</label>
-                                    <input v-model="binding.ip" type="text" />
-                                </div>
-                                <div class="form-field small-field">
-                                    <label>Port</label>
-                                    <input v-model.number="binding.port" type="number" min="1" max="65535" />
-                                </div>
                                 <div class="form-field checkbox-grid">
-                                    <label>
-                                        <input v-model="binding.is_admin" type="checkbox" />
-                                        Admin portal
-                                    </label>
                                     <label>
                                         <input v-model="binding.is_tls" type="checkbox" />
                                         Enable TLS (https://)
+                                        <span class="help-icon" data-tooltip="Enable this if you want to secure the connection using TLS. If you do, you should also specify the paths to the TLS certificate and key files on the sites attached.">?</span>
                                     </label>
+                                    <label>
+                                        <input v-model="binding.is_admin" type="checkbox" />
+                                        Admin portal
+                                        <span class="help-icon" data-tooltip="Whether this binding is for the Grux Admin portal, serving the API for admin requests. This should ONLY be enable on the binding which serves the admin interface.">?</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="two-column-layout form-grid max500">
+                                <div class="compact half-width">
+                                    <div class="form-field small-field">
+                                        <label>IP Address</label>
+                                        <input v-model="binding.ip" type="text" />
+                                    </div>
+                                </div>
+                                <div class="compact half-width">
+                                    <div class="form-field small-field">
+                                        <label>Port</label>
+                                        <input v-model.number="binding.port" type="number" min="1" max="65535" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1042,16 +1096,20 @@ onMounted(() => {
                                     </div>
 
                                     <!-- Processors List -->
-                                    <div v-for="(processor, processorIndex) in getSiteProcessors(siteIndex)" :key="processor.id" class="processor-item">
+                                    <div v-for="(processor, processorIndex) in getSiteProcessorModels(siteIndex)" :key="processor.handler.id" class="processor-item">
                                         <div class="item-header compact" @click="toggleSiteProcessor(siteIndex, processorIndex)">
                                             <div class="header-left">
                                                 <span class="section-icon" :class="{ expanded: isSiteProcessorExpanded(siteIndex, processorIndex) }">▶</span>
-                                                <span v-if="processor.processor_type === 'static'" class="hierarchy-indicator">📄</span>
-                                                <span v-else-if="processor.processor_type === 'php'" class="hierarchy-indicator">🐘</span>
-                                                <span v-else-if="processor.processor_type === 'proxy'" class="hierarchy-indicator">🔀</span>
-                                                <h6>{{ processor.name || processor.processor_type?.toUpperCase() + ' Processor' }}</h6>
-                                                <span class="priority-badge">Priority: {{ processor.priority }}</span>
-                                                <span v-if="!processor.is_enabled" class="admin-badge">DISABLED</span>
+                                                <span v-if="processor.handler.processor_type === 'static'" class="hierarchy-indicator">📄</span>
+                                                <span v-else-if="processor.handler.processor_type === 'php'" class="hierarchy-indicator">🐘</span>
+                                                <span v-else-if="processor.handler.processor_type === 'proxy'" class="hierarchy-indicator">🔀</span>
+                                                <h6>{{ processor.handler.name || processor.handler.processor_type?.toUpperCase() + ' Processor' }}</h6>
+                                                <span class="priority-badge">Priority: {{ processorIndex + 1 }}</span>
+                                                <div class="priority-controls">
+                                                    <button @click.stop="moveProcessorOrder(siteIndex, processor.handler.id, 'up')" class="priority-adjust-button" title="Move up">▲</button>
+                                                    <button @click.stop="moveProcessorOrder(siteIndex, processor.handler.id, 'down')" class="priority-adjust-button" title="Move down">▼</button>
+                                                </div>
+                                                <span v-if="!processor.handler.is_enabled" class="admin-badge">DISABLED</span>
                                             </div>
                                             <button @click.stop="removeProcessorFromSite(siteIndex, processorIndex)" class="remove-button compact small">Remove</button>
                                         </div>
@@ -1062,26 +1120,28 @@ onMounted(() => {
                                                 <div class="form-grid compact">
                                                     <div class="form-field checkbox-grid compact">
                                                         <label>
-                                                            <input v-model="processor.is_enabled" type="checkbox" />
+                                                            <input v-model="processor.handler.is_enabled" type="checkbox" />
                                                             Enabled
+                                                        </label>
+
+                                                        <label v-if="processor.handler.processor_type === 'proxy'">
+                                                            <input v-model="processor.proxy_config.verify_tls_certificates" type="checkbox" />
+                                                            Verify TLS Certificates
+                                                            <span class="help-icon" data-tooltip="If enabled, TLS certificates of the upstream server will be verified when proxying. For self-signed certificates, this should likely be disabled.">?</span>
                                                         </label>
                                                     </div>
                                                 </div>
 
                                                 <div class="form-grid compact">
                                                     <div class="form-field">
-                                                        <label>Name</label>
-                                                        <input v-model="processor.name" type="text" placeholder="Processor name" />
-                                                    </div>
-                                                    <div class="form-field">
-                                                        <label>Priority (lower = higher priority)</label>
-                                                        <input v-model.number="processor.priority" type="number" min="1" max="255" />
+                                                        <label>Name <span class="help-icon" data-tooltip="The name of the processor, used for identification purposes only.">?</span></label>
+                                                        <input v-model="processor.handler.name" type="text" placeholder="Processor name" />
                                                     </div>
 
                                                     <div class="form-field">
-                                                        <label>URL Match Patterns</label>
+                                                        <label>URL Match Patterns <span class="help-icon" data-tooltip="List of url match patterns. * is used to match on all urls and means that this processor will try to serve all urls, if possible. You can add multiple patterns to match for this processor, such as '/assets' and '/static'.">?</span></label>
                                                         <div class="tag-field">
-                                                            <div v-for="(pattern, patternIndex) in processor.url_match" :key="patternIndex" class="tag-item">
+                                                            <div v-for="(pattern, patternIndex) in processor.handler.url_match" :key="patternIndex" class="tag-item">
                                                                 {{ pattern }}
                                                                 <button @click="removeUrlMatchFromProcessor(siteIndex, processorIndex, patternIndex)" class="tag-remove-button">×</button>
                                                             </div>
@@ -1095,6 +1155,174 @@ onMounted(() => {
                                                                 class="tag-input"
                                                             />
                                                         </div>
+                                                    </div>
+
+                                                    <!-- Processor type-specific configuration -->
+                                                    <div v-if="processor.handler.processor_type === 'static'" class="form-field">
+                                                        <div v-if="processor.static_config" class="processor-type-config form-grid">
+                                                            <label>
+                                                                Web Root
+                                                                <span class="help-icon" data-tooltip="Directory to serve static files from, relative (./www-default) or absolute.">?</span>
+                                                            </label>
+                                                            <input v-model="processor.static_config.web_root" type="text" placeholder="./www-default" />
+
+                                                            <div class="list-field compact">
+                                                                <label>Index Files <span class="help-icon" data-tooltip="If a users requests a directory, Grux looks after these files to be served, such as 'index.html'.">?</span></label>
+                                                                <div class="list-items">
+                                                                    <div v-for="(file, fileIndex) in processor.static_config.web_root_index_file_list" :key="fileIndex" class="list-item">
+                                                                        <input v-model="processor.static_config.web_root_index_file_list[fileIndex]" type="text" placeholder="index.html" />
+                                                                        <button @click="processor.static_config.web_root_index_file_list.splice(fileIndex, 1)" class="remove-item-button">×</button>
+                                                                    </div>
+                                                                    <button @click="processor.static_config.web_root_index_file_list.push('index.html')" class="add-item-button">+ Add Index File</button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div v-else class="empty-association-warning-inline">⚠️ Static processor config not found for ID: {{ processor.handler.processor_id }}</div>
+                                                    </div>
+
+                                                    <div v-else-if="processor.handler.processor_type === 'php'" class="form-field">
+                                                        <div v-if="processor.php_config" class="processor-type-config">
+                                                            <label>Served By <span class="help-icon" data-tooltip="Select the PHP handler type used to serve PHP files. The Windows PHP-CGI option is mostly on Windows platforms and refers to a managed instance of PHP-CGI controlled by Grux. On Linux systems, PHP-FPM (FastCGI Process Manager) should be used.">?</span></label>
+                                                            <select v-model="processor.php_config.served_by_type">
+                                                                <option value="php-fpm">PHP-FPM (FastCGI)</option>
+                                                                <option value="win-php-cgi">Windows PHP-CGI (managed)</option>
+                                                            </select>
+
+                                                            <div class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>
+                                                                        Local Web Root
+                                                                        <span class="help-icon" data-tooltip="Local web root Grux uses to resolve PHP files (Used by the local managed PHP-CGI mode as the web root).">?</span>
+                                                                    </label>
+                                                                    <input v-model="processor.php_config.local_web_root" type="text" placeholder="./www-default" />
+                                                                </div>
+                                                                <div class="half-width">
+                                                                    <label>Request Timeout (seconds) <span class="help-icon" data-tooltip="Request timeout in seconds for PHP requests. This supersedes the request timeout defined in php.ini file and this should be set equal or a bit higher than the max_execution_time setting in php.ini.">?</span></label>
+                                                                    <input v-model.number="processor.php_config.request_timeout" type="number" min="1" max="3600" />
+                                                                </div>
+                                                            </div>
+
+                                                            <div v-if="processor.php_config.served_by_type === 'php-fpm'" class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>FastCGI IP:Port <span class="help-icon" data-tooltip="IP address and port of the FastCGI server, if using the PHP-FPM mode (e.g., 127.0.0.1:9000)">?</span></label>
+                                                                    <input v-model="processor.php_config.fastcgi_ip_and_port" type="text" placeholder="127.0.0.1:9000" />
+                                                                </div>
+                                                                <div class="half-width">
+                                                                    <label>FastCGI Web Root <span class="help-icon" data-tooltip="Web root directory used by the FastCGI server, if using the PHP-FPM mode (e.g., /var/www/html). File request paths will be rewritten to match this root.">?</span></label>
+                                                                    <input v-model="processor.php_config.fastcgi_web_root" type="text" placeholder="/var/www/html" />
+                                                                </div>
+                                                            </div>
+
+                                                            <div v-else-if="processor.php_config.served_by_type === 'win-php-cgi'" class="form-field">
+                                                                <label>PHP-CGI Handler <span class="help-icon" data-tooltip="Select the PHP-CGI handler to use for processing PHP requests in the Windows PHP-CGI mode.">?</span></label>
+                                                                <select v-if="config.php_cgi_handlers && config.php_cgi_handlers.length" v-model="processor.php_config.php_cgi_handler_id">
+                                                                    <option value="">-- Select Handler --</option>
+                                                                    <option v-for="h in config.php_cgi_handlers" :key="h.id" :value="h.id">{{ (h.name && String(h.name).trim().length ? h.name : 'PHP-CGI') + ' (' + h.id + ')' }}</option>
+                                                                </select>
+                                                                <input v-else v-model="processor.php_config.php_cgi_handler_id" type="text" placeholder="PHP-CGI handler UUID" />
+                                                            </div>
+                                                        </div>
+                                                        <div v-else class="empty-association-warning-inline">⚠️ PHP processor config not found for ID: {{ processor.handler.processor_id }}</div>
+                                                    </div>
+
+                                                    <div v-else-if="processor.handler.processor_type === 'proxy'" class="form-field">
+                                                        <div v-if="processor.proxy_config" class="processor-type-config">
+                                                            <div class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>Proxy Type <span class="help-icon" data-tooltip="Select the type of proxy to use for this processor. Currently only HTTP is supported.">?</span></label>
+                                                                    <select v-model="processor.proxy_config.proxy_type">
+                                                                        <option value="http">HTTP</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div class="half-width">
+                                                                    <label>Load Balancing Strategy <span class="help-icon" data-tooltip="Select the strategy used to distribute requests among upstream servers. Currently only Round Robin is supported.">?</span></label>
+                                                                    <select v-model="processor.proxy_config.load_balancing_strategy">
+                                                                        <option value="round_robin">Round Robin</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-field">
+                                                                <label>Upstream Servers <span class="help-icon" data-tooltip="List of upstream servers to which requests will be proxied, in the form: 'http://hostname:port' or 'https://hostname:port'.">?</span></label>
+                                                                <div class="list-items">
+                                                                    <div v-for="(server, serverIndex) in processor.proxy_config.upstream_servers" :key="serverIndex" class="list-item">
+                                                                        <input v-model="processor.proxy_config.upstream_servers[serverIndex]" type="text" placeholder="http://localhost:8080" />
+                                                                        <button @click="processor.proxy_config.upstream_servers.splice(serverIndex, 1)" class="remove-item-button">×</button>
+                                                                    </div>
+                                                                    <button @click="processor.proxy_config.upstream_servers.push('http://localhost:8080')" class="add-item-button">+ Add Upstream</button>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>Timeout (seconds) <span class="help-icon" data-tooltip="Timeout, in seconds, for proxy requests to upstream server before connection is considered failed.">?</span></label>
+                                                                    <input v-model.number="processor.proxy_config.timeout_seconds" type="number" min="1" max="3600" />
+                                                                </div>
+                                                                <div class="half-width"></div>
+                                                            </div>
+
+                                                            <div class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>
+                                                                        Health Check Path (empty = disabled)
+                                                                        <span class="help-icon" data-tooltip="Path to check on upstream server for health status. Only checks for HTTP 200 OK response and content is ignored. Example: '/health' or '/' or '/health?key=123'. To disable, leave the field empty.">?</span>
+                                                                    </label>
+                                                                    <input v-model="processor.proxy_config.health_check_path" type="text" placeholder="/health" />
+                                                                </div>
+                                                                <div class="half-width">
+                                                                    <label>Health Check Interval (seconds) <span class="help-icon" data-tooltip="Interval, in seconds, between health checks to upstream server.">?</span></label>
+                                                                    <input v-model.number="processor.proxy_config.health_check_interval_seconds" type="number" min="1" max="86400" />
+                                                                </div>
+                                                            </div>
+                                                            <div class="two-column-layout">
+                                                                <div class="half-width">
+                                                                    <label>Health Check Timeout (seconds) <span class="help-icon" data-tooltip="Timeout, in seconds, for each health check request to upstream server. Should be kept relatively low, like 5 seconds.">?</span></label>
+                                                                    <input v-model.number="processor.proxy_config.health_check_timeout_seconds" type="number" min="1" max="3600" />
+                                                                </div>
+                                                                <div class="half-width"></div>
+                                                            </div>
+
+                                                            <div class="list-field compact">
+                                                                <label>URL Rewrites <span class="help-icon" data-tooltip="Define rules to rewrite URLs before they are sent to the upstream server, which is done as a search/replace in the full url, considering whether it should be case sensitive or not.">?</span></label>
+                                                                <div class="list-items">
+                                                                        <div v-for="(rw, rwIndex) in processor.proxy_config.url_rewrites" :key="rwIndex" class="list-item url-rewrite-item">
+                                                                        <div class="rewrite-row">
+                                                                            <div class="rewrite-field">
+                                                                                <label class="rewrite-label">From:</label>
+                                                                                <input v-model="rw.from" type="text" placeholder="/path" class="key-input" />
+                                                                            </div>
+                                                                            <div class="rewrite-field">
+                                                                                <label class="rewrite-label">To:</label>
+                                                                                <input v-model="rw.to" type="text" placeholder="/new-path" class="value-input" />
+                                                                            </div>
+                                                                                <button @click="processor.proxy_config.url_rewrites.splice(rwIndex, 1)" class="remove-item-button rewrite-remove-button">×</button>
+                                                                        </div>
+                                                                        <label class="inline-checkbox">
+                                                                            <input v-model="rw.is_case_insensitive" type="checkbox" />
+                                                                            Is case insensitive? <span class="help-icon" data-tooltip="If enabled, the URL rewrite rule will be applied in a case-insensitive manner. Eg. if enabled, the rewrite '/API' to '/my-site-api' will also be applied to '/api', '/Api' and changed to '/my-site-api'. If not enabled, only the exact case will be matched.">?</span>
+                                                                        </label>
+
+                                                                    </div>
+                                                                    <button @click="processor.proxy_config.url_rewrites.push({ from: '', to: '', is_case_insensitive: false })" class="add-item-button">+ Add Rewrite</button>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-grid compact">
+                                                                <div class="form-field checkbox-grid compact">
+                                                                    <label>
+                                                                        <input v-model="processor.proxy_config.preserve_host_header" type="checkbox" />
+                                                                        Preserve Host Header
+                                                                        <span class="help-icon" data-tooltip="If enabled, the original Host header from the client request will be preserved when proxying to the upstream server.">?</span>
+                                                                    </label>
+                                                                </div>
+                                                                <div class="form-field">
+                                                                    <label>Forced Host Header (optional) <span class="help-icon" data-tooltip="If set, this value will be used as the Host header when proxying to the upstream server, overriding the original Host header from the client request. Will break HTTP2 requests and should probably in most cases not be used.">?</span></label>
+                                                                    <input v-model="processor.proxy_config.forced_host_header" type="text" placeholder="example.com" />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div v-else class="empty-association-warning-inline">⚠️ Proxy processor config not found for ID: {{ processor.handler.processor_id }}</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1151,115 +1379,56 @@ onMounted(() => {
                 </div>
             </div>
 
-            <!-- External Request Handlers Section -->
+            <!-- Managed External Systems Section -->
             <div class="config-section">
-                <div class="section-header" @click="toggleSection('externalRequestHandlers')">
-                    <span class="section-icon" :class="{ expanded: expandedSections.externalRequestHandlers }">▶</span>
+                <div class="section-header" @click="toggleSection('managedExternalSystems')">
+                    <span class="section-icon" :class="{ expanded: expandedSections.managedExternalSystems }">▶</span>
                     <span class="section-title-icon">🔌</span>
-                    <h3>External Request Handlers</h3>
-                    <button @click.stop="addExternalRequestHandler" class="add-button">+ Add Handler</button>
+                    <h3>Managed External Systems</h3>
+                    <button @click.stop="addPhpCgiHandler" class="add-button">+ Add System</button>
                 </div>
 
-                <div v-if="expandedSections.externalRequestHandlers" class="section-content">
-                    <div v-if="!config.request_handlers || config.request_handlers.length === 0" class="empty-state-section">
+                <div v-if="expandedSections.managedExternalSystems" class="section-content">
+                    <div v-if="!config.php_cgi_handlers || config.php_cgi_handlers.length === 0" class="empty-state-section">
                         <div class="empty-icon">🔌</div>
-                        <p>No external request handlers configured</p>
-                        <button @click="addExternalRequestHandler" class="add-button">+ Add First Handler</button>
+                        <p>No managed external systems configured</p>
+                        <button @click="addPhpCgiHandler" class="add-button">+ Add First System</button>
                     </div>
 
-                    <!-- External Request Handlers List -->
-                    <div v-for="(handler, handlerIndex) in config.request_handlers" :key="handler.id" class="server-item">
-                        <div class="item-header compact" @click="toggleExternalRequestHandler(handlerIndex)">
+                    <!-- Managed External Systems List (PHP-CGI only for now) -->
+                    <div v-for="(handler, handlerIndex) in config.php_cgi_handlers" :key="handler.id" class="server-item">
+                        <div class="item-header compact" @click="togglePhpCgiHandler(handlerIndex)">
                             <div class="header-left">
-                                <span class="section-icon" :class="{ expanded: isExternalRequestHandlerExpanded(handlerIndex) }">▶</span>
+                                <span class="section-icon" :class="{ expanded: isPhpCgiHandlerExpanded(handlerIndex) }">▶</span>
                                 <span class="hierarchy-indicator handler-indicator">🔌</span>
-                                <h4>{{ handler.name }}</h4>
-                                <span class="handler-type-badge">{{ handler.handler_type?.toUpperCase() || 'NO TYPE' }}</span>
-                                <span v-if="!handler.is_enabled" class="admin-badge">DISABLED</span>
+                                <h4>{{ handler.name || 'PHP-CGI' }}</h4>
+                                <span class="handler-type-badge">PHP-CGI</span>
+                                <span class="item-summary">{{ handler.id }}</span>
                             </div>
-                            <button @click.stop="removeExternalRequestHandler(handlerIndex)" class="remove-button compact">Remove</button>
+                            <button @click.stop="removePhpCgiHandler(handlerIndex)" class="remove-button compact">Remove</button>
                         </div>
 
-                        <!-- External Request Handler Content -->
-                        <div v-if="isExternalRequestHandlerExpanded(handlerIndex)" class="item-content">
-                            <!-- Enabled checkbox at the top -->
+                        <!-- Managed External System Content -->
+                        <div v-if="isPhpCgiHandlerExpanded(handlerIndex)" class="item-content">
                             <div class="form-grid compact">
-                                <div class="form-field checkbox-grid compact">
+                                <div class="form-field">
+                                    <label>Name</label>
+                                    <input v-model="handler.name" type="text" placeholder="e.g., PHP-CGI Pool" />
+                                </div>
+                                <div class="form-field">
                                     <label>
-                                        <input v-model="handler.is_enabled" type="checkbox" />
-                                        Enabled
+                                        Executable Path
+                                        <span class="help-icon" data-tooltip="Full path to php-cgi.exe. This must exist on the server running Grux.">?</span>
                                     </label>
+                                    <input v-model="handler.executable" type="text" placeholder="C:/path/to/php-cgi.exe" />
                                 </div>
-                            </div>
-
-                            <!-- Two column layout for main fields -->
-                            <div class="handler-two-column-layout">
-                                <!-- First column -->
-                                <div class="handler-column">
-                                    <div class="form-field">
-                                        <label>Handler Name</label>
-                                        <input v-model="handler.name" type="text" placeholder="e.g., PHP-CGI Pool" />
-                                    </div>
-                                    <div class="form-field">
-                                        <label>Handler Type</label>
-                                        <select v-model="handler.handler_type">
-                                            <option value="">-- Select Type --</option>
-                                            <option value="php">PHP</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-field">
-                                        <label>Request Timeout (seconds)</label>
-                                        <input v-model.number="handler.request_timeout" type="number" min="1" max="3600" />
-                                    </div>
-                                    <div class="form-field">
-                                        <label>Concurrent Threads (0 = auto)</label>
-                                        <input v-model.number="handler.concurrent_threads" type="number" min="0" max="1000" />
-                                    </div>
+                                <div class="form-field">
+                                    <label>Request Timeout (seconds)</label>
+                                    <input v-model.number="handler.request_timeout" type="number" min="1" max="3600" />
                                 </div>
-
-                                <!-- Second column -->
-                                <div class="handler-column">
-                                    <div class="form-field">
-                                        <label>Executable Path</label>
-                                        <input v-model="handler.executable" type="text" placeholder="Path to executable (e.g., php-cgi.exe)" />
-                                    </div>
-                                    <div class="form-field">
-                                        <label>IP and Port (optional, for FastCGI)</label>
-                                        <input v-model="handler.ip_and_port" type="text" placeholder="e.g., 127.0.0.1:9000" />
-                                    </div>
-                                    <div class="form-field">
-                                        <label>Alternative Web Root (optional)</label>
-                                        <input v-model="handler.other_webroot" type="text" placeholder="Override site web root for this handler" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Two column layout for config and environment -->
-                            <div class="two-column-layout">
-                                <!-- Extra Handler Config -->
-                                <div class="list-field compact half-width">
-                                    <label>Extra Handler Configuration</label>
-                                    <div class="list-items">
-                                        <div v-for="(configPair, configIndex) in handler.extra_handler_config" :key="configIndex" class="list-item key-value">
-                                            <input v-model="handler.extra_handler_config[configIndex][0]" type="text" placeholder="Key" class="key-input" />
-                                            <input v-model="handler.extra_handler_config[configIndex][1]" type="text" placeholder="Value" class="value-input" />
-                                            <button @click="removeHandlerConfig(handlerIndex, configIndex)" class="remove-item-button">×</button>
-                                        </div>
-                                        <button @click="addHandlerConfig(handlerIndex)" class="add-item-button">+ Add Config</button>
-                                    </div>
-                                </div>
-
-                                <!-- Extra Environment Variables -->
-                                <div class="list-field compact half-width">
-                                    <label>Extra Environment Variables</label>
-                                    <div class="list-items">
-                                        <div v-for="(envPair, envIndex) in handler.extra_environment" :key="envIndex" class="list-item key-value">
-                                            <input v-model="handler.extra_environment[envIndex][0]" type="text" placeholder="ENV_VAR" class="key-input" />
-                                            <input v-model="handler.extra_environment[envIndex][1]" type="text" placeholder="value" class="value-input" />
-                                            <button @click="removeEnvironmentVar(handlerIndex, envIndex)" class="remove-item-button">×</button>
-                                        </div>
-                                        <button @click="addEnvironmentVar(handlerIndex)" class="add-item-button">+ Add Variable</button>
-                                    </div>
+                                <div class="form-field">
+                                    <label>Concurrent Threads (0 = auto)</label>
+                                    <input v-model.number="handler.concurrent_threads" type="number" min="0" max="1000" />
                                 </div>
                             </div>
                         </div>
@@ -1429,7 +1598,6 @@ onMounted(() => {
     border-radius: 12px;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
     border: 1px solid #e5e7eb;
-    overflow: hidden;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
@@ -1463,6 +1631,10 @@ onMounted(() => {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+.max500 {
+    max-width: 500px;
 }
 
 .binding-summary,
@@ -1558,6 +1730,10 @@ onMounted(() => {
     gap: 3rem;
 }
 
+.form-field select {
+    margin-bottom: 1rem;
+}
+
 .list-field.compact {
     margin: 0;
     padding: 1rem;
@@ -1586,6 +1762,7 @@ onMounted(() => {
 .item-content {
     background: #fefefe;
     border-top: 1px solid #f1f5f9;
+    padding-bottom: 20px;
 }
 
 .config-header {
@@ -1803,6 +1980,15 @@ onMounted(() => {
     font-size: 0.9rem;
 }
 
+.save-error-list {
+    margin: 0.75rem 0 0 1.25rem;
+    padding: 0;
+}
+
+.save-error-list li {
+    margin: 0.25rem 0;
+}
+
 .form-error-message .error-details,
 .save-error-message .error-details {
     margin: 0.5rem 0 0 0;
@@ -1832,7 +2018,6 @@ onMounted(() => {
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     border: 1px solid #e5e7eb;
-    overflow: hidden;
 }
 
 .config-editor-inline .config-section {
@@ -1896,7 +2081,6 @@ onMounted(() => {
     border-radius: 8px;
     border-left: 4px solid #3b82f6;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-    overflow: hidden;
 }
 
 .binding-item {
@@ -1904,7 +2088,6 @@ onMounted(() => {
     background: #f8fafc;
     border-radius: 8px;
     border-left: 3px solid #10b981;
-    overflow: hidden;
 }
 
 .site-item {
@@ -1912,7 +2095,6 @@ onMounted(() => {
     background: #ffffff;
     border-radius: 6px;
     border-left: 2px solid #f59e0b;
-    overflow: hidden;
 }
 
 .item-header {
@@ -2135,9 +2317,8 @@ onMounted(() => {
 
 .form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
     gap: 1.5rem;
-    padding: 1.5rem 1.25rem;
     background: white;
 }
 
@@ -2164,7 +2345,7 @@ onMounted(() => {
     display: flex;
     flex-wrap: wrap;
     flex-direction: row;
-    gap: 1rem;
+    gap: 2rem;
     padding: 1rem;
     background: #f8fafc;
     border-radius: 8px;
@@ -2176,14 +2357,13 @@ onMounted(() => {
     color: #374151;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
     font-size: 0.875rem;
     margin-bottom: 0.25rem;
 }
 
 .form-field input[type='text'],
 .form-field input[type='number'] {
-    padding: 0.875rem;
+    padding: 0.375rem;
     border: 2px solid #e5e7eb;
     border-radius: 8px;
     font-size: 0.875rem;
@@ -2203,6 +2383,7 @@ onMounted(() => {
     width: 18px;
     height: 18px;
     accent-color: #667eea;
+    margin-right: 10px;
 }
 
 .list-field {
@@ -2227,6 +2408,7 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    margin-bottom: 1rem;
 }
 
 .list-item {
@@ -2396,8 +2578,8 @@ onMounted(() => {
 .two-column-layout {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-    margin-top: 1rem;
+    gap: 1rem;
+    margin-bottom: 1rem;
 }
 
 /* Three column layout for lists */
@@ -2405,7 +2587,7 @@ onMounted(() => {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap: 1.5rem;
-    margin-top: 1rem;
+    margin-bottom: 1rem;
 }
 
 .third-width {
@@ -2510,11 +2692,10 @@ onMounted(() => {
 }
 
 .processor-item {
-    margin: 0.75rem 0;
     background: white;
     border-radius: 8px;
     border: 1px solid #e2e8f0;
-    overflow: hidden;
+    margin: 0.75rem 1rem;
 }
 
 .processor-item .item-header {
@@ -2903,6 +3084,27 @@ onMounted(() => {
     color: #92400e;
 }
 
+.priority-controls {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.priority-adjust-button {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.7rem;
+    line-height: 1;
+    border-radius: 4px;
+    border: 1px solid #f59e0b;
+    background: #fef3c7;
+    color: #92400e;
+    cursor: pointer;
+}
+
+.priority-adjust-button:hover {
+    background: #fde68a;
+}
+
 .handler-select {
     flex: 1;
     padding: 0.45rem;
@@ -2953,7 +3155,7 @@ onMounted(() => {
 }
 
 .form-field select {
-    padding: 0.875rem;
+    padding: 0.375rem;
     border: 2px solid #e5e7eb;
     border-radius: 8px;
     font-size: 0.875rem;
@@ -2972,6 +3174,63 @@ onMounted(() => {
     grid-template-columns: 1fr 1fr auto;
     gap: 0.5rem;
     align-items: center;
+}
+
+.list-item.url-rewrite-item {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.rewrite-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.rewrite-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.rewrite-remove-button {
+    margin-bottom: 0.15rem;
+}
+
+.inline-checkbox {
+    gap: 0.5rem;
+    margin: 0;
+    display: flex !important;
+    align-self: flex-start;
+    margin: 0.5rem 0;
+}
+
+.inline-checkbox input[type='checkbox'] {
+    margin: 0;
+}
+
+@media (max-width: 640px) {
+    .rewrite-row {
+        grid-template-columns: 1fr;
+    }
+
+    .rewrite-remove-button {
+        justify-self: end;
+        margin-bottom: 0;
+    }
+}
+
+.rewrite-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #4b5563;
+    margin: 0;
+    padding: 0;
 }
 
 .key-input,
@@ -3039,7 +3298,7 @@ onMounted(() => {
 
 .handler-column .form-field input,
 .handler-column .form-field select {
-    padding: 0.875rem;
+    padding: 0.375rem;
     border: 2px solid #e5e7eb;
     border-radius: 8px;
     font-size: 0.875rem;

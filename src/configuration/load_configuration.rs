@@ -1,7 +1,6 @@
 use crate::configuration::binding_site_relation::BindingSiteRelationship;
 use crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION;
-
-use crate::external_connections::php_cgi;
+use crate::external_connections::managed_system::php_cgi;
 use crate::http::request_handlers::processors::php_processor;
 use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor, ProxyProcessorRewrite};
 use crate::http::request_handlers::processors::static_files_processor::StaticFileProcessor;
@@ -15,19 +14,19 @@ use sqlite::State;
 use std::collections::HashMap;
 
 // Load the configuration from the database or create a default one if it doesn't exist
-pub fn init() -> Result<Configuration, String> {
-    let connection = get_database_connection()?;
+pub fn init() -> Result<Configuration, Vec<String>> {
+    let connection = get_database_connection().map_err(|e| vec![format!("Failed to get database connection: {}", e)])?;
 
     // Check if we need to load the default configuration
     let schema_version = {
         let mut statement = connection
             .prepare("SELECT grux_value FROM grux WHERE grux_key = 'schema_version' LIMIT 1")
-            .map_err(|e| format!("Failed to prepare schema version query: {}", e))?;
+            .map_err(|e| vec![format!("Failed to prepare schema version query: {}", e)])?;
 
-        match statement.next().map_err(|e| format!("Failed to execute schema version query: {}", e))? {
+        match statement.next().map_err(|e| vec![format!("Failed to execute schema version query: {}", e)])? {
             State::Row => {
-                let version_str: String = statement.read(0).map_err(|e| format!("Failed to read schema version: {}", e))?;
-                version_str.parse::<i64>().map_err(|e| format!("Failed to parse schema version: {}", e))?
+                let version_str: String = statement.read(0).map_err(|e| vec![format!("Failed to read schema version: {}", e)])?;
+                version_str.parse::<i64>().map_err(|e| vec![format!("Failed to parse schema version: {}", e)])?
             }
             State::Done => 0, // No version found, assume 0
         }
@@ -49,12 +48,12 @@ pub fn init() -> Result<Configuration, String> {
             // Update schema version to 1
             connection
                 .execute("UPDATE grux SET grux_value = '1' WHERE grux_key = 'schema_version'")
-                .map_err(|e| format!("Failed to update schema version: {}", e))?;
+                .map_err(|e| vec![format!("Failed to update schema version: {}", e)])?;
 
             configuration
         } else {
             // Load existing configuration
-            fetch_configuration_in_db()?
+            fetch_configuration_in_db().map_err(|e| vec![format!("Failed to load configuration from database: {}", e)])?
         }
     };
 
@@ -127,8 +126,7 @@ fn load_proxy_processors(connection: &Connection) -> Result<Vec<ProxyProcessor>,
         let upstream_servers = parse_comma_separated_list(&upstream_servers_str);
 
         // Url rewrites is stored as JSON array
-        let url_rewrites: Vec<ProxyProcessorRewrite> = serde_json::from_str(&url_rewrites_str)
-            .map_err(|e| format!("Failed to parse url_rewrites JSON: {}", e))?;
+        let url_rewrites: Vec<ProxyProcessorRewrite> = serde_json::from_str(&url_rewrites_str).map_err(|e| format!("Failed to parse url_rewrites JSON: {}", e))?;
 
         processors.push(ProxyProcessor {
             id: processor_id,
@@ -142,7 +140,7 @@ fn load_proxy_processors(connection: &Connection) -> Result<Vec<ProxyProcessor>,
             url_rewrites,
             preserve_host_header: preserve_host_header_int != 0,
             forced_host_header,
-            verify_tls_certificates: verify_tls_certificates_int != 0
+            verify_tls_certificates: verify_tls_certificates_int != 0,
         });
     }
     Ok(processors)
@@ -185,11 +183,12 @@ fn load_php_cgi_handlers(connection: &Connection) -> Result<Vec<php_cgi::PhpCgi>
     let mut handlers = Vec::new();
     while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute PHP-CGI handlers query: {}", e))? {
         let handler_id: String = statement.read(0).map_err(|e| format!("Failed to read handler id: {}", e))?;
-        let request_timeout: i64 = statement.read(1).map_err(|e| format!("Failed to read request_timeout: {}", e))?;
-        let concurrent_threads: i64 = statement.read(2).map_err(|e| format!("Failed to read concurrent_threads: {}", e))?;
-        let executable: String = statement.read(3).map_err(|e| format!("Failed to read executable: {}", e))?;
+        let name: String = statement.read(1).map_err(|e| format!("Failed to read name: {}", e))?;
+        let request_timeout: i64 = statement.read(2).map_err(|e| format!("Failed to read request_timeout: {}", e))?;
+        let concurrent_threads: i64 = statement.read(3).map_err(|e| format!("Failed to read concurrent_threads: {}", e))?;
+        let executable: String = statement.read(4).map_err(|e| format!("Failed to read executable: {}", e))?;
 
-        handlers.push(php_cgi::PhpCgi::new(handler_id, request_timeout as u32, concurrent_threads as u32, executable));
+        handlers.push(php_cgi::PhpCgi::new(handler_id, name, request_timeout as u32, concurrent_threads as u32, executable));
     }
 
     Ok(handlers)
@@ -365,7 +364,8 @@ fn load_binding_sites_relationships(connection: &Connection) -> Result<Vec<Bindi
 
 fn load_request_handlers(connection: &Connection) -> Result<Vec<RequestHandler>, String> {
     let mut statement = connection
-        .prepare("SELECT * FROM request_handler")
+        // Select explicit columns to remain compatible with older schemas that may still have a legacy 'priority' column.
+        .prepare("SELECT id, is_enabled, name, processor_type, processor_id, url_match FROM request_handler")
         .map_err(|e| format!("Failed to prepare request handlers query: {}", e))?;
 
     let mut request_handlers = Vec::new();
@@ -373,10 +373,9 @@ fn load_request_handlers(connection: &Connection) -> Result<Vec<RequestHandler>,
         let handler_id: String = statement.read(0).map_err(|e| format!("Failed to read handler id: {}", e))?;
         let is_enabled: i64 = statement.read(1).map_err(|e| format!("Failed to read is_enabled: {}", e))?;
         let name: String = statement.read(2).map_err(|e| format!("Failed to read name: {}", e))?;
-        let priority: i64 = statement.read(3).map_err(|e| format!("Failed to read priority: {}", e))?;
-        let processor_type: String = statement.read(4).map_err(|e| format!("Failed to read processor_type: {}", e))?;
-        let processor_id: String = statement.read(5).map_err(|e| format!("Failed to read processor_id: {}", e))?;
-        let url_match_str: Option<String> = statement.read(6).ok();
+        let processor_type: String = statement.read(3).map_err(|e| format!("Failed to read processor_type: {}", e))?;
+        let processor_id: String = statement.read(4).map_err(|e| format!("Failed to read processor_id: {}", e))?;
+        let url_match_str: Option<String> = statement.read(5).ok();
 
         // Parse comma-separated strings
         let url_match = parse_comma_separated_list(&url_match_str.unwrap_or_default());
@@ -385,7 +384,6 @@ fn load_request_handlers(connection: &Connection) -> Result<Vec<RequestHandler>,
             id: handler_id,
             is_enabled: is_enabled != 0,
             name,
-            priority: priority as u8,
             processor_type,
             processor_id,
             url_match,

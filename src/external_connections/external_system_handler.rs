@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::Semaphore;
 
-use crate::{external_connections::php_cgi::PhpCgi, logging::syslog::trace};
+use crate::{external_connections::managed_system::php_cgi::PhpCgi, logging::syslog::trace};
 
 pub struct ExternalSystemHandler {
     pub php_cgi_id_to_port: HashMap<String, u16>,
@@ -24,6 +24,7 @@ impl ExternalSystemHandler {
         for php_cgi_config in &config.php_cgi_handlers {
             let mut new_php_cgi = PhpCgi::new(
                 php_cgi_config.id.clone(),
+                php_cgi_config.name.clone(),
                 php_cgi_config.request_timeout,
                 php_cgi_config.concurrent_threads,
                 php_cgi_config.executable.clone(),

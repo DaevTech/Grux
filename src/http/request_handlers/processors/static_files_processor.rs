@@ -130,6 +130,11 @@ impl ProcessorTrait for StaticFileProcessor {
                     continue;
                 }
                 file_data = file_data_result.unwrap();
+                if file_data.exists == false {
+                    trace(format!("Index files in dir does not exist: {}", file_path));
+                    continue;
+                }
+
                 file_path = file_data.file_path.clone();
                 trace(format!("Found index file: {}", file_path));
                 found_index = true;

@@ -5,7 +5,8 @@ use crate::configuration::request_handler::RequestHandler;
 use crate::configuration::server_settings::ServerSettings;
 use crate::configuration::site::Site;
 use crate::configuration::{binding::Binding, binding_site_relation::BindingSiteRelationship};
-use crate::external_connections::php_cgi::PhpCgi;
+use crate::external_connections::managed_system::php_cgi::PhpCgi;
+use crate::http::request_handlers::processor_trait::ProcessorTrait;
 use crate::http::request_handlers::processors::php_processor::PHPProcessor;
 use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor, ProxyProcessorRewrite};
 use crate::http::request_handlers::processors::static_files_processor::StaticFileProcessor;
@@ -105,6 +106,26 @@ impl Configuration {
         for handler in &mut self.request_handlers {
             handler.sanitize();
         }
+
+        // Sanitize static file processors
+        for processor in &mut self.static_file_processors {
+            processor.sanitize();
+        }
+
+        // Sanitize PHP processors
+        for processor in &mut self.php_processors {
+            processor.sanitize();
+        }
+
+        // Sanitize proxy processors
+        for processor in &mut self.proxy_processors {
+            processor.sanitize();
+        }
+
+        // Sanitize external systems
+        for php_cgi in &mut self.php_cgi_handlers {
+            php_cgi.sanitize();
+        }
     }
 
     // Validates the entire configuration
@@ -163,6 +184,38 @@ impl Configuration {
             }
         }
 
+        // Valdidate processors
+        for processor in &self.static_file_processors {
+            if let Err(processor_errors) = processor.validate() {
+                for error in processor_errors {
+                    errors.push(format!("Static File Processor {}: {}", processor.id, error));
+                }
+            }
+        }
+        for processor in &self.php_processors {
+            if let Err(processor_errors) = processor.validate() {
+                for error in processor_errors {
+                    errors.push(format!("PHP Processor {}: {}", processor.id, error));
+                }
+            }
+        }
+        for processor in &self.proxy_processors {
+            if let Err(processor_errors) = processor.validate() {
+                for error in processor_errors {
+                    errors.push(format!("Proxy Processor {}: {}", processor.id, error));
+                }
+            }
+        }
+
+        // Validate external systems
+        for (_, php_cgi) in self.php_cgi_handlers.iter().enumerate() {
+            if let Err(php_cgi_errors) = php_cgi.validate() {
+                for error in php_cgi_errors {
+                    errors.push(format!("PHP-CGI Handler '{}': {}", php_cgi.id, error));
+                }
+            }
+        }
+
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
@@ -210,7 +263,6 @@ impl Configuration {
             name: "Static File Handler".to_string(),
             processor_type: "static".to_string(),
             processor_id: request1_static_processor.id.clone(),
-            priority: 1,
             url_match: vec!["*".to_string()],
         };
 
@@ -244,7 +296,6 @@ impl Configuration {
             id: Uuid::new_v4().to_string(),
             is_enabled: true,
             name: "Static File Handler".to_string(),
-            priority: 1,
             processor_type: "static".to_string(),
             processor_id: request2_static_processor.id.clone(),
             url_match: vec!["*".to_string()],
@@ -272,7 +323,7 @@ impl Configuration {
 
         // External systems
         let php1_cgi_id = Uuid::new_v4().to_string();
-        let php_cgi_handler = PhpCgi::new(php1_cgi_id.clone(), 30, 0, "D:/dev/php/8.4.13nts/php-cgi.exe".to_string());
+        let php_cgi_handler = PhpCgi::new(php1_cgi_id.clone(), "PHP 8.4 handler".to_string(), 30, 0, "D:/dev/php/8.4.13nts/php-cgi.exe".to_string());
         configuration.php_cgi_handlers.push(php_cgi_handler);
 
         // Request handler for php
@@ -286,7 +337,6 @@ impl Configuration {
             id: Uuid::new_v4().to_string(),
             is_enabled: true,
             name: "PHP processor".to_string(),
-            priority: 1,
             processor_type: "php".to_string(),
             processor_id: request2_php_processor.id.clone(),
             url_match: vec!["*".to_string()],
@@ -298,7 +348,6 @@ impl Configuration {
             id: Uuid::new_v4().to_string(),
             is_enabled: true,
             name: "Static File Handler".to_string(),
-            priority: 2,
             processor_type: "static".to_string(),
             processor_id: request3_static_processor.id.clone(),
             url_match: vec!["*".to_string()],
@@ -342,7 +391,6 @@ impl Configuration {
             id: Uuid::new_v4().to_string(),
             is_enabled: true,
             name: "Proxy test".to_string(),
-            priority: 2,
             processor_type: "proxy".to_string(),
             processor_id: request4_proxy_processor.id.clone(),
             url_match: vec!["*".to_string()],

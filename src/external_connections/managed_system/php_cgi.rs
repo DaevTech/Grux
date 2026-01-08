@@ -1,14 +1,3 @@
-/*
-// Move to specific processor instead
-pub request_timeout: usize,                      // Seconds
-pub concurrent_threads: usize,                   // 0 = automatically based on CPU cores on this machine - If PHP-FPM or similar is used, this should match the max children configured there
-pub executable: String,                          // Path to the executable or script that handles the request, like php-cgi.exe location for PHP on windows
-pub ip_and_port: String,                         // IP and port to connect to the handler, e.g. 127.0.0.1:9000 for FastCGI passthrough
-pub other_webroot: String,                       // Optional webroot to use when passing to the handler, if different from the site's webroot
-pub extra_handler_config: Vec<(String, String)>, // Key/value pairs for extra handler configuration
-pub extra_environment: Vec<(String, String)>,    // Key/value pairs to add to environment, passed on to the handler
-*/
-
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::{
@@ -28,6 +17,7 @@ pub struct PhpCgi {
     // Unique identifier for the external system
     pub id: String,
     // Inputs from configuration
+    pub name: String,
     pub request_timeout: u32,
     pub concurrent_threads: u32,
     pub executable: String,
@@ -46,12 +36,13 @@ pub struct PhpCgi {
 }
 
 impl PhpCgi {
-    pub fn new(id: String, request_timeout: u32, concurrent_threads: u32, executable: String) -> Self {
+    pub fn new(id: String, name: String, request_timeout: u32, concurrent_threads: u32, executable: String) -> Self {
         // Get the singleton port manager instance
         let port_manager = get_port_manager().clone();
 
         Self {
             id,
+            name,
             request_timeout,
             concurrent_threads,
             executable,
@@ -61,6 +52,45 @@ impl PhpCgi {
             port_manager,
             last_activity: Instant::now(),
         }
+    }
+
+    pub fn sanitize(&mut self) {
+        // Clean up executable path
+        self.executable = self.executable.trim().to_string();
+
+        // Clean up name
+        self.name = self.name.trim().to_string();
+    }
+
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Validate that ID is not empty
+        if self.id.is_empty() {
+            errors.push("PHP-CGI ID cannot be empty.".to_string());
+        }
+
+        // Should have non-empty name
+        if self.name.is_empty() {
+            errors.push("PHP-CGI name cannot be empty.".to_string());
+        }
+
+        // Validate that request is larger than zero
+        if self.request_timeout < 1 {
+            errors.push("PHP-CGI request timeout must be at least 1 second.".to_string());
+        }
+
+        // Validate executable path
+        if self.executable.is_empty() {
+            errors.push("PHP-CGI executable path cannot be empty.".to_string());
+        }
+
+        // Validate that executable exists
+        if !self.executable.is_empty() && !std::path::Path::new(&self.executable).exists() {
+            errors.push(format!("PHP-CGI executable not found at path: {}", self.executable));
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     pub fn get_max_children_processes(&self) -> u32 {

@@ -92,7 +92,6 @@ fn get_init_sql() -> Vec<String> {
         id TEXT PRIMARY KEY,
         is_enabled BOOLEAN NOT NULL DEFAULT 1,
         name TEXT NOT NULL DEFAULT '',
-        priority INTEGER NOT NULL DEFAULT 1,
         processor_type TEXT NOT NULL DEFAULT '',
         processor_id TEXT NOT NULL DEFAULT '',
         url_match TEXT NOT NULL DEFAULT ''
@@ -134,6 +133,7 @@ fn get_init_sql() -> Vec<String> {
         // PHP-CGI handlers table
         "CREATE TABLE IF NOT EXISTS php_cgi_handlers (
         id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
         request_timeout INTEGER NOT NULL DEFAULT 30,
         concurrent_threads INTEGER NOT NULL DEFAULT 0,
         executable TEXT NOT NULL DEFAULT ''

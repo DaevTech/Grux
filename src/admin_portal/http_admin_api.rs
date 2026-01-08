@@ -44,6 +44,8 @@ pub async fn handle_api_routes(grux_request: &mut GruxRequest, site: &Site) -> R
         admin_post_configuration_reload(grux_request, site).await
     } else if path_cleaned == "operation-mode" && method == "GET" {
         admin_get_operation_mode_endpoint(grux_request, site).await
+    } else if path_cleaned == "operation-mode" && method == "POST" {
+        admin_post_operation_mode_endpoint(grux_request, site).await
     } else {
         // If we reach here, no matching admin API route was found
         trace(format!("No matching admin API route found for path: {}", path_cleaned));
@@ -348,10 +350,9 @@ pub async fn admin_post_configuration_endpoint(grux_request: &mut GruxRequest, _
             return Ok(response);
         }
         Err(validation_errors) => {
-            error(format!("Configuration validation failed: {}", validation_errors));
+            info(format!("Configuration validation failed: {}", validation_errors.join("; ")));
             let error_response = serde_json::json!({
-                "error": "Configuration validation failed",
-                "details": validation_errors
+                "errors": validation_errors
             });
 
             let mut response = GruxResponse::new_with_bytes(hyper::StatusCode::BAD_REQUEST.as_u16(), bytes::Bytes::from(error_response.to_string()));
@@ -671,7 +672,7 @@ pub async fn admin_get_operation_mode_endpoint(grux_request: &mut GruxRequest, _
 }
 
 // Admin operation mode POST endpoint - changes operation mode
-pub async fn admin_post_operation_mode_endpoint(mut grux_request: GruxRequest, _admin_site: &Site) -> Result<GruxResponse, GruxError> {
+pub async fn admin_post_operation_mode_endpoint(grux_request: &mut GruxRequest, _admin_site: &Site) -> Result<GruxResponse, GruxError> {
     // Check if this is a POST request
     if grux_request.get_http_method() != "POST" {
         let mut response = GruxResponse::new_with_bytes(hyper::StatusCode::METHOD_NOT_ALLOWED.as_u16(), bytes::Bytes::from(r#"{"error": "Method not allowed"}"#));

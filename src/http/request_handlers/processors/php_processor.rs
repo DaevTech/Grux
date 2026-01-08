@@ -144,6 +144,11 @@ impl ProcessorTrait for PHPProcessor {
                 return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
             }
             file_data = file_data_result.unwrap();
+            if file_data.exists == false {
+                trace(format!("Index files in dir does not exist: {}", file_path));
+                return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
+            }
+
             file_path = file_data.file_path.clone();
             trace(format!("Found index file: {}", file_path));
             uri_is_a_dir_with_index_file_inside = true;

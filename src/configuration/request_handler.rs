@@ -17,7 +17,6 @@ pub struct RequestHandler {
     pub id: String,             // Generated uuid, unique, so it can be referenced from sites as a handler
     pub is_enabled: bool,       // Whether it is enabled or not
     pub name: String,           // A name to identify the handler for the user, self chosen
-    pub priority: u8,           // Lower values indicate higher priority, equal values are not guaranteed order and therefore should be avoided
     pub processor_type: String, // Reference to the type of processor, e.g., "static_file", "proxy", "php" etc.
     // Reference to specific processor that will handle the request
     pub processor_id: String, // The processor ID
@@ -31,7 +30,6 @@ impl RequestHandler {
             id: Uuid::new_v4().to_string(),
             is_enabled: true,
             name: "New Request Handler".to_string(),
-            priority: 1,
             processor_type: "".to_string(),
             processor_id: String::new(),
             url_match: vec!["*".to_string()],

@@ -176,7 +176,7 @@ impl SysLog {
             OperationMode::DEV => LogType::Trace,
             OperationMode::DEBUG => LogType::Debug,
             OperationMode::PRODUCTION => LogType::Info,
-            OperationMode::SPEEDTEST => LogType::Warn,
+            OperationMode::ULTIMATE => LogType::Warn,
         }
     }
 }
@@ -192,7 +192,7 @@ fn init_log() -> SysLog {
         OperationMode::DEV => LogType::Trace,
         OperationMode::DEBUG => LogType::Debug,
         OperationMode::PRODUCTION => LogType::Info,
-        OperationMode::SPEEDTEST => LogType::Warn,
+        OperationMode::ULTIMATE => LogType::Warn,
     };
 
     let sys_log = SysLog::new(log_level, LogType::Info);

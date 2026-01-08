@@ -17,7 +17,7 @@ const modes = [
   { value: 'DEV', label: 'Development', color: '#10b981' },
   { value: 'DEBUG', label: 'Debug', color: '#f59e0b' },
   { value: 'PRODUCTION', label: 'Production', color: '#3b82f6' },
-  { value: 'SPEEDTEST', label: 'Speed Test', color: '#8b5cf6' }
+  { value: 'ULTIMATE', label: 'Ultimate', color: '#8b5cf6' }
 ]
 
 // Fetch current operation mode
@@ -111,7 +111,7 @@ const getCurrentModeColor = () => {
 
 <template>
   <div class="operation-mode-selector">
-    <label class="mode-label">Operation Mode <span class="help-icon" data-tooltip="Operation mode determines the level of system logging and performance characteristics. DEV being the most verbose and SPEEDTEST being the least logging. For normal use, PRODUCTION mode is recommended.">?</span></label>
+    <label class="mode-label">Operation Mode <span class="help-icon" data-tooltip="Operation mode determines the level of system logging and performance characteristics. DEV being the most verbose and ULTIMATE being the least logging. For normal use, PRODUCTION mode is recommended.">?</span></label>
 
     <div v-if="isLoading" class="mode-loading">
       <div class="loading-spinner-small"></div>

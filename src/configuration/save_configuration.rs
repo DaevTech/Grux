@@ -6,7 +6,7 @@ use crate::configuration::request_handler::RequestHandler;
 use crate::configuration::site::HeaderKV;
 use crate::configuration::site::Site;
 use crate::core::database_connection::get_database_connection;
-use crate::external_connections::php_cgi::PhpCgi;
+use crate::external_connections::managed_system::php_cgi::PhpCgi;
 use crate::http::request_handlers::processors::php_processor::PHPProcessor;
 use crate::http::request_handlers::processors::proxy_processor::ProxyProcessor;
 use crate::http::request_handlers::processors::static_files_processor::StaticFileProcessor;
@@ -17,19 +17,19 @@ use sqlite::State;
 
 /// Save a new configuration to the database
 /// Returns Ok(true) if changes were saved, Ok(false) if no changes were needed
-pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
+pub fn save_configuration(config: &mut Configuration) -> Result<bool, Vec<String>> {
     // First, we sanitize the configuration
     config.sanitize();
 
     // Then we validate the configuration
-    config.validate().map_err(|errors| format!("Configuration validation failed: {}", errors.join("; ")))?;
+    config.validate()?;
 
     // Check if the configuration is different from what's currently in the database
-    let current_config = fetch_configuration_in_db()?;
+    let current_config = fetch_configuration_in_db().map_err(|e| vec![format!("Failed to fetch current configuration from database: {}", e)])?;
 
     // Serialize both configurations to JSON for comparison
-    let new_config_json = serde_json::to_string(config).map_err(|e| format!("Failed to serialize new configuration: {}", e))?;
-    let current_config_json = serde_json::to_string(&current_config).map_err(|e| format!("Failed to serialize current configuration: {}", e))?;
+    let new_config_json = serde_json::to_string(config).map_err(|e| vec![format!("Failed to serialize new configuration: {}", e)])?;
+    let current_config_json = serde_json::to_string(&current_config).map_err(|e| vec![format!("Failed to serialize current configuration: {}", e)])?;
 
     // If configurations are identical, no need to save
     if new_config_json == current_config_json {
@@ -37,33 +37,33 @@ pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
     }
 
     // Do the actual saving
-    let connection = get_database_connection()?;
+    let connection = get_database_connection().map_err(|e| vec![format!("Failed to get database connection: {}", e)])?;
 
     // Begin transaction for atomicity
-    connection.execute("BEGIN TRANSACTION").map_err(|e| format!("Failed to begin transaction: {}", e))?;
+    connection.execute("BEGIN TRANSACTION").map_err(|e| vec![format!("Failed to begin transaction: {}", e)])?;
 
     // Save core configuration (file cache, gzip, server settings)
-    save_core_config(&connection, &config.core)?;
+    save_core_config(&connection, &config.core).map_err(|e| vec![format!("Failed to save core configuration: {}", e)])?;
 
     // Clear and re-insert all bindings (simpler than update/delete logic)
-    connection.execute("DELETE FROM bindings").map_err(|e| format!("Failed to clear existing bindings: {}", e))?;
+    connection.execute("DELETE FROM bindings").map_err(|e| vec![format!("Failed to clear existing bindings: {}", e)])?;
 
     for binding in &config.bindings {
-        save_binding(&connection, binding)?;
+        save_binding(&connection, binding).map_err(|e| vec![format!("Failed to save binding: {}", e)])?;
     }
 
     // Clear and re-insert all sites (simpler than update/delete logic)
-    connection.execute("DELETE FROM sites").map_err(|e| format!("Failed to clear existing sites: {}", e))?;
+    connection.execute("DELETE FROM sites").map_err(|e| vec![format!("Failed to clear existing sites: {}", e)])?;
 
     for site in &config.sites {
-        save_site(&connection, site)?;
+        save_site(&connection, site).map_err(|e| vec![format!("Failed to save site: {}", e)])?;
     }
 
     // Save the binding-site relationships
     // First, clear existing relationships
     connection
         .execute("DELETE FROM binding_sites")
-        .map_err(|e| format!("Failed to clear existing binding-site relationships: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing binding-site relationships: {}", e)])?;
 
     for relationship in &config.binding_sites {
         connection
@@ -71,52 +71,52 @@ pub fn save_configuration(config: &mut Configuration) -> Result<bool, String> {
                 "INSERT INTO binding_sites (binding_id, site_id) VALUES ({}, {})",
                 relationship.binding_id, relationship.site_id
             ))
-            .map_err(|e| format!("Failed to insert binding-site relationship: {}", e))?;
+            .map_err(|e| vec![format!("Failed to insert binding-site relationship: {}", e)])?;
     }
 
     // Save request handlers, but clear existing one first
     connection
         .execute("DELETE FROM request_handler")
-        .map_err(|e| format!("Failed to clear existing request handlers: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing request handlers: {}", e)])?;
     for handler in &config.request_handlers {
-        save_request_handler(&connection, handler)?;
+        save_request_handler(&connection, handler).map_err(|e| vec![format!("Failed to save request handler: {}", e)])?;
     }
 
     // Save static file processors, clear existing first
     connection
         .execute("DELETE FROM static_file_processors")
-        .map_err(|e| format!("Failed to clear existing processors: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing processors: {}", e)])?;
     for processor in &config.static_file_processors {
-        save_static_file_processor(&connection, processor)?;
+        save_static_file_processor(&connection, processor).map_err(|e| vec![format!("Failed to save static file processor: {}", e)])?;
     }
 
     // Save PHP processors, clear existing first
     connection
         .execute("DELETE FROM php_processors")
-        .map_err(|e| format!("Failed to clear existing PHP processors: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing PHP processors: {}", e)])?;
     for processor in &config.php_processors {
-        save_php_processor(&connection, processor)?;
+        save_php_processor(&connection, processor).map_err(|e| vec![format!("Failed to save PHP processor: {}", e)])?;
     }
 
     // Save proxy processors, clear existing first
     connection
         .execute("DELETE FROM proxy_processors")
-        .map_err(|e| format!("Failed to clear existing Proxy processors: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing Proxy processors: {}", e)])?;
     for processor in &config.proxy_processors {
         // Implement save_proxy_processor similarly to other save functions
-        save_proxy_processor(&connection, processor)?;
+        save_proxy_processor(&connection, processor).map_err(|e| vec![format!("Failed to save Proxy processor: {}", e)])?;
     }
 
     // Save PHP-CGI handlers, clear existing first
     connection
         .execute("DELETE FROM php_cgi_handlers")
-        .map_err(|e| format!("Failed to clear existing PHP-CGI handlers: {}", e))?;
+        .map_err(|e| vec![format!("Failed to clear existing PHP-CGI handlers: {}", e)])?;
     for handler in &config.php_cgi_handlers {
-        save_php_cgi_handler(&connection, handler)?;
+        save_php_cgi_handler(&connection, handler).map_err(|e| vec![format!("Failed to save PHP-CGI handler: {}", e)])?;
     }
 
     // Commit transaction
-    connection.execute("COMMIT").map_err(|e| format!("Failed to commit transaction: {}", e))?;
+    connection.execute("COMMIT").map_err(|e| vec![format!("Failed to commit transaction: {}", e)])?;
 
     info("Configuration saved successfully");
 
@@ -167,8 +167,9 @@ fn save_php_processor(connection: &Connection, processor: &PHPProcessor) -> Resu
 fn save_php_cgi_handler(connection: &Connection, handler: &PhpCgi) -> Result<(), String> {
     connection
         .execute(format!(
-            "INSERT INTO php_cgi_handlers (id, request_timeout, concurrent_threads, executable) VALUES ('{}', {}, {}, '{}')",
+            "INSERT INTO php_cgi_handlers (id, name, request_timeout, concurrent_threads, executable) VALUES ('{}', '{}', {}, {}, '{}')",
             handler.id,
+            handler.name.replace("'", "''"),
             handler.request_timeout,
             handler.concurrent_threads,
             handler.executable.replace("'", "''")
@@ -312,11 +313,10 @@ fn save_request_handler(connection: &Connection, handler: &RequestHandler) -> Re
     // Insert request handler with comma-separated fields
     connection
         .execute(format!(
-            "INSERT INTO request_handler (id, is_enabled, name, priority, processor_type, processor_id, url_match) VALUES ('{}', {}, '{}', {}, '{}', '{}', '{}')",
+            "INSERT INTO request_handler (id, is_enabled, name, processor_type, processor_id, url_match) VALUES ('{}', {}, '{}', '{}', '{}', '{}')",
             handler.id,
             if handler.is_enabled { 1 } else { 0 },
             handler.name.replace("'", "''"),
-            handler.priority,
             handler.processor_type,
             handler.processor_id,
             url_match_str

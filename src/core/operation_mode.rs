@@ -12,7 +12,7 @@ pub enum OperationMode {
     DEV,
     DEBUG,
     PRODUCTION,
-    SPEEDTEST,
+    ULTIMATE,
 }
 
 pub fn load_operation_mode() -> OperationMode {
@@ -46,7 +46,7 @@ pub fn match_string_to_operation_mode(mode_str: &str) -> Option<OperationMode> {
         "DEV" => Some(OperationMode::DEV),
         "DEBUG" => Some(OperationMode::DEBUG),
         "PRODUCTION" => Some(OperationMode::PRODUCTION),
-        "SPEEDTEST" => Some(OperationMode::SPEEDTEST),
+        "ULTIMATE" => Some(OperationMode::ULTIMATE),
         _ => None,
     }
 }
@@ -69,7 +69,7 @@ pub fn get_operation_mode_as_string() -> String {
         OperationMode::DEV => "DEV".to_string(),
         OperationMode::DEBUG => "DEBUG".to_string(),
         OperationMode::PRODUCTION => "PRODUCTION".to_string(),
-        OperationMode::SPEEDTEST => "SPEEDTEST".to_string(),
+        OperationMode::ULTIMATE => "ULTIMATE".to_string(),
     }
 }
 

@@ -89,7 +89,7 @@ fn start_grux_basics() {
             get_cached_configuration();
         }
         Err(e) => {
-            error(format!("Failed to load configuration: {}", e));
+            error(format!("Failed to load configuration: {}", e.join("; ")));
             std::process::exit(1);
         }
     }

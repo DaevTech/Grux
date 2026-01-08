@@ -187,6 +187,16 @@ impl ProcessorTrait for ProxyProcessor {
             errors.push("Unsupported load balancing strategy. Only 'Round Robin' is supported.".to_string());
         }
 
+        // Url rewrites validation, must never have empty to or from fields
+        for rewrite in &self.url_rewrites {
+            if rewrite.from.is_empty() {
+                errors.push("URL rewrite 'from' field cannot be empty.".to_string());
+            }
+            if rewrite.to.is_empty() {
+                errors.push("URL rewrite 'to' field cannot be empty.".to_string());
+            }
+        }
+
         if self.timeout_seconds < 1 {
             errors.push("Timeout seconds must be greater than zero.".to_string());
         }
