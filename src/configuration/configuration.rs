@@ -8,7 +8,7 @@ use crate::configuration::{binding::Binding, binding_site_relation::BindingSiteR
 use crate::external_connections::managed_system::php_cgi::PhpCgi;
 use crate::http::request_handlers::processor_trait::ProcessorTrait;
 use crate::http::request_handlers::processors::php_processor::PHPProcessor;
-use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor, ProxyProcessorRewrite};
+use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor};
 use crate::http::request_handlers::processors::static_files_processor::StaticFileProcessor;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -229,34 +229,31 @@ impl Configuration {
 
         // Bindings
         let admin_binding = Binding {
-            id: 1,
+            id: Uuid::new_v4().to_string(),
             ip: "0.0.0.0".to_string(),
             port: 8000,
             is_admin: true,
             is_tls: true,
             sites: Vec::new(),
         };
-        configuration.bindings.push(admin_binding);
 
         let default_binding = Binding {
-            id: 2,
+            id: Uuid::new_v4().to_string(),
             ip: "0.0.0.0".to_string(),
             port: 80,
             is_admin: false,
             is_tls: false,
             sites: Vec::new(),
         };
-        configuration.bindings.push(default_binding);
 
         let default_binding_tls = Binding {
-            id: 3,
+            id: Uuid::new_v4().to_string(),
             ip: "0.0.0.0".to_string(),
             port: 443,
             is_admin: false,
             is_tls: true,
             sites: Vec::new(),
         };
-        configuration.bindings.push(default_binding_tls);
 
         // Static file processor for first site
         let request1_static_processor = StaticFileProcessor::new("./www-default".to_string(), vec!["index.html".to_string()]);
@@ -273,7 +270,7 @@ impl Configuration {
 
         // Sites
         let default_site = Site {
-            id: 1,
+            id: Uuid::new_v4().to_string(),
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
@@ -287,11 +284,6 @@ impl Configuration {
             access_log_enabled: false,
             access_log_file: "".to_string(),
         };
-        configuration.sites.push(default_site);
-        configuration.binding_sites.push(BindingSiteRelationship { binding_id: 2, site_id: 1 });
-        configuration.binding_sites.push(BindingSiteRelationship { binding_id: 3, site_id: 1 });
-        configuration.request_handlers.push(request_handler1);
-        configuration.static_file_processors.push(request1_static_processor);
 
         // Static file processor for admin site
         let request2_static_processor = StaticFileProcessor::new("./www-admin".to_string(), vec!["index.html".to_string()]);
@@ -307,7 +299,7 @@ impl Configuration {
         };
 
         let admin_site = Site {
-            id: 2,
+            id: Uuid::new_v4().to_string(),
             hostnames: vec!["*".to_string()],
             is_default: true,
             is_enabled: true,
@@ -321,102 +313,32 @@ impl Configuration {
             access_log_enabled: false,
             access_log_file: "".to_string(),
         };
+
+        // Default site
+        configuration.binding_sites.push(BindingSiteRelationship {
+            binding_id: default_binding.id.clone(),
+            site_id: default_site.id.clone(),
+        });
+        configuration.binding_sites.push(BindingSiteRelationship {
+            binding_id: default_binding_tls.id.clone(),
+            site_id: default_site.id.clone(),
+        });
+        configuration.sites.push(default_site);
+        configuration.request_handlers.push(request_handler1);
+        configuration.static_file_processors.push(request1_static_processor);
+
+        // Admin site
+        configuration.binding_sites.push(BindingSiteRelationship {
+            binding_id: admin_binding.id.clone(),
+            site_id: admin_site.id.clone(),
+        });
         configuration.sites.push(admin_site);
-        configuration.binding_sites.push(BindingSiteRelationship { binding_id: 1, site_id: 2 });
         configuration.request_handlers.push(request_handler2);
         configuration.static_file_processors.push(request2_static_processor);
 
-        // External systems
-        let php1_cgi_id = Uuid::new_v4().to_string();
-        let php_cgi_handler = PhpCgi::new(php1_cgi_id.clone(), "PHP 8.4 handler".to_string(), 30, 0, "D:/dev/php/8.4.13nts/php-cgi.exe".to_string());
-        configuration.php_cgi_handlers.push(php_cgi_handler);
-
-        // Request handler for php
-        let mut request2_php_processor = PHPProcessor::new();
-        request2_php_processor.served_by_type = "win-php-cgi".to_string();
-        request2_php_processor.php_cgi_handler_id = php1_cgi_id.clone();
-        request2_php_processor.local_web_root = "D:/dev/gruxi-website".to_string();
-
-        let request_handler2 = RequestHandler {
-            id: Uuid::new_v4().to_string(),
-            is_enabled: true,
-            name: "PHP processor".to_string(),
-            processor_type: "php".to_string(),
-            processor_id: request2_php_processor.id.clone(),
-            url_match: vec!["*".to_string()],
-        };
-
-        // Request handler for the static files
-        let request3_static_processor = StaticFileProcessor::new("D:/dev/gruxi-website".to_string(), vec!["".to_string()]);
-        let request_handler3 = RequestHandler {
-            id: Uuid::new_v4().to_string(),
-            is_enabled: true,
-            name: "Static File Handler".to_string(),
-            processor_type: "static".to_string(),
-            processor_id: request3_static_processor.id.clone(),
-            url_match: vec!["*".to_string()],
-        };
-
-        let gruxi_site = Site {
-            id: 3,
-            hostnames: vec!["gruxisite".to_string()],
-            is_default: false,
-            is_enabled: true,
-            tls_cert_path: "".to_string(),
-            tls_cert_content: "".to_string(),
-            tls_key_path: "".to_string(),
-            tls_key_content: "".to_string(),
-            request_handlers: vec![request_handler3.id.clone(), request_handler2.id.clone()],
-            rewrite_functions: vec!["OnlyWebRootIndexForSubdirs".to_string()],
-            extra_headers: vec![],
-            access_log_enabled: false,
-            access_log_file: "".to_string(),
-        };
-        configuration.sites.push(gruxi_site);
-        configuration.binding_sites.push(BindingSiteRelationship { binding_id: 2, site_id: 3 });
-        configuration.request_handlers.push(request_handler2);
-        configuration.request_handlers.push(request_handler3);
-        configuration.static_file_processors.push(request3_static_processor);
-        configuration.php_processors.push(request2_php_processor);
-
-        // Request handler for the static files
-        let mut request4_proxy_processor = ProxyProcessor::new();
-        request4_proxy_processor.upstream_servers = vec!["http://192.168.0.186:5000".to_string()];
-        request4_proxy_processor.url_rewrites = vec![ProxyProcessorRewrite {
-            from: "/test".to_string(),
-            to: "/tests1".to_string(),
-            is_case_insensitive: true,
-        }];
-        request4_proxy_processor.verify_tls_certificates = false;
-
-        let request_handler4 = RequestHandler {
-            id: Uuid::new_v4().to_string(),
-            is_enabled: true,
-            name: "Proxy test".to_string(),
-            processor_type: "proxy".to_string(),
-            processor_id: request4_proxy_processor.id.clone(),
-            url_match: vec!["*".to_string()],
-        };
-
-        let gruxi_proxy = Site {
-            id: 4,
-            hostnames: vec!["gruxiproxy".to_string()],
-            is_default: false,
-            is_enabled: true,
-            tls_cert_path: "".to_string(),
-            tls_cert_content: "".to_string(),
-            tls_key_path: "".to_string(),
-            tls_key_content: "".to_string(),
-            request_handlers: vec![request_handler4.id.clone()],
-            rewrite_functions: vec!["OnlyWebRootIndexForSubdirs".to_string()],
-            extra_headers: vec![],
-            access_log_enabled: false,
-            access_log_file: "".to_string(),
-        };
-        configuration.sites.push(gruxi_proxy);
-        configuration.binding_sites.push(BindingSiteRelationship { binding_id: 2, site_id: 4 });
-        configuration.request_handlers.push(request_handler4);
-        configuration.proxy_processors.push(request4_proxy_processor);
+        configuration.bindings.push(admin_binding);
+        configuration.bindings.push(default_binding);
+        configuration.bindings.push(default_binding_tls);
 
         configuration
     }

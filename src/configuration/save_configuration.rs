@@ -77,7 +77,7 @@ pub fn save_configuration(config: &mut Configuration, force: bool) -> Result<boo
     for relationship in &config.binding_sites {
         connection
             .execute(format!(
-                "INSERT INTO binding_sites (binding_id, site_id) VALUES ({}, {})",
+                "INSERT INTO binding_sites (binding_id, site_id) VALUES ('{}', '{}')",
                 relationship.binding_id, relationship.site_id
             ))
             .map_err(|e| vec![format!("Failed to insert binding-site relationship: {}", e)])?;
@@ -261,7 +261,7 @@ fn save_binding(connection: &Connection, binding: &Binding) -> Result<(), String
     // Insert binding with explicit ID (all bindings are re-inserted after DELETE FROM bindings)
     connection
         .execute(format!(
-            "INSERT INTO bindings (id, ip, port, is_admin, is_tls) VALUES ({}, '{}', {}, {}, {})",
+            "INSERT INTO bindings (id, ip, port, is_admin, is_tls) VALUES ('{}', '{}', {}, {}, {})",
             binding.id,
             binding.ip.replace("'", "''"),
             binding.port,
@@ -278,7 +278,7 @@ fn save_binding(connection: &Connection, binding: &Binding) -> Result<(), String
 pub fn save_site(connection: &Connection, site: &Site) -> Result<(), String> {
     // Remove any site with the same ID first (to avoid conflicts)
     connection
-        .execute(format!("DELETE FROM sites WHERE id = {}", site.id))
+        .execute(format!("DELETE FROM sites WHERE id = '{}'", site.id))
         .map_err(|e| format!("Failed to delete existing site with id {}: {}", site.id, e))?;
 
     let extra_headers_str = if site.extra_headers.is_empty() {
@@ -293,7 +293,7 @@ pub fn save_site(connection: &Connection, site: &Site) -> Result<(), String> {
 
     connection
         .execute(format!(
-            "INSERT INTO sites (id, is_default, is_enabled, hostnames, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, request_handlers, rewrite_functions, access_log_enabled, access_log_file, extra_headers) VALUES ({}, {}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}', '{}')",
+            "INSERT INTO sites (id, is_default, is_enabled, hostnames, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, request_handlers, rewrite_functions, access_log_enabled, access_log_file, extra_headers) VALUES ('{}', {}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}', '{}')",
             site.id,
             if site.is_default { 1 } else { 0 },
             if site.is_enabled { 1 } else { 0 },

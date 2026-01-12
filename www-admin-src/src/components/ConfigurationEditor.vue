@@ -904,7 +904,7 @@ onMounted(() => {
                                 </div>
                             </div>
 
-                            <div class="two-column-layout form-grid max500">
+                            <div class="two-column-layout form-grid max500 compact">
                                 <div class="compact half-width">
                                     <div class="form-field small-field">
                                         <label>IP Address</label>

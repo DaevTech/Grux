@@ -59,7 +59,7 @@ pub async fn persist_generated_tls_for_site(site: &mut Site, cert_pem: &str, key
 
     // Update the fields in the database directly
     let sql_update = format!(
-        "UPDATE sites SET tls_cert_path = '{}', tls_key_path = '{}' WHERE id = {};",
+        "UPDATE sites SET tls_cert_path = '{}', tls_key_path = '{}' WHERE id = '{}';",
         site.tls_cert_path, site.tls_key_path, site.id
     );
     connection.execute(sql_update.as_str()).map_err(|e| format!("Failed to update site TLS paths in database: {}", e))?;

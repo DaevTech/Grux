@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HeaderKV {
@@ -9,7 +10,7 @@ pub struct HeaderKV {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Site {
-    pub id: usize,
+    pub id: String,
     pub hostnames: Vec<String>,
     pub is_default: bool,
     pub is_enabled: bool,
@@ -34,7 +35,7 @@ pub static REWRITE_FUNCTIONS: &[&str] = &["OnlyWebRootIndexForSubdirs"];
 impl Site {
     pub fn new() -> Self {
         Site {
-            id: 0,
+            id: Uuid::new_v4().to_string(),
             hostnames: vec!["*".to_string()],
             is_default: false,
             is_enabled: true,
@@ -348,7 +349,7 @@ fn test_site_validation_rewrite_functions_whitespace_only() {
 #[cfg(test)]
 fn create_valid_site() -> Site {
     Site {
-        id: 1,
+        id: Uuid::new_v4().to_string(),
         hostnames: vec!["example.com".to_string()],
         is_default: false,
         is_enabled: true,

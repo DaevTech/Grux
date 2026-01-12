@@ -22,14 +22,14 @@ pub fn import_configuration_from_file(path: &PathBuf) -> Result<(), String> {
     let loose_typed: serde_json::Value = serde_json::from_str(&file_contents).map_err(|e| format!("Failed to parse configuration file {}: {}", path.display(), e))?;
 
     // Check that versions match
-    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION.to_string() {
+    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION {
         // Here we could add version migration logic in the future
 
         // If we reach here, versions do not match
         return Err(format!(
             "Configuration version mismatch: expected {}, found {}",
             crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION,
-            loose_typed["version"].as_str().unwrap_or("unknown")
+            loose_typed["version"].as_i64().unwrap_or(-1)
         ));
     }
 
@@ -56,11 +56,11 @@ pub fn validate_configuration_file(path: &PathBuf) -> Result<(), String> {
     let loose_typed: serde_json::Value = serde_json::from_str(&file_contents).map_err(|e| format!("Failed to parse configuration file {}: {}", path.display(), e))?;
 
     // Check that versions match
-    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION.to_string() {
+    if loose_typed["version"] != crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION {
         return Err(format!(
             "Configuration version mismatch: expected {}, found {}",
             crate::configuration::configuration::CURRENT_CONFIGURATION_VERSION,
-            loose_typed["version"].as_str().unwrap_or("unknown")
+            loose_typed["version"].as_i64().unwrap_or(-1)
         ));
     }
 

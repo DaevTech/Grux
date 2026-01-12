@@ -4,7 +4,7 @@ use crate::configuration::site::Site;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct Binding {
-    pub id: usize,
+    pub id: String,
     pub ip: String,
     pub port: u16,
     pub is_admin: bool,
@@ -23,7 +23,7 @@ impl Binding {
     }
 
     pub fn sanitize(&mut self) {
-
+        self.ip = self.ip.trim().to_string();
     }
 
     pub fn validate(&self) -> Result<(), Vec<String>> {

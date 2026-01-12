@@ -73,7 +73,6 @@ fn get_schema_version() -> i32 {
 
 // Load the configuration from the normalized database tables - Returns the data from db as fresh
 pub fn fetch_configuration_in_db() -> Result<Configuration, String> {
-
     let schema_version = get_schema_version();
 
     let connection = get_database_connection()?;
@@ -210,12 +209,12 @@ fn load_php_cgi_handlers(connection: &Connection) -> Result<Vec<php_cgi::PhpCgi>
 
 pub fn handle_relationship_binding_sites(relationships: &Vec<BindingSiteRelationship>, bindings: &mut Vec<Binding>, sites: &Vec<Site>) {
     // For sites and binding, generate hashmaps for quick lookup
-    let mut binding_map = bindings.iter_mut().map(|b| (b.id, b)).collect::<HashMap<_, _>>();
-    let site_map = sites.iter().map(|s| (s.id, s)).collect::<HashMap<_, _>>();
+    let mut binding_map = bindings.iter_mut().map(|b| (b.id.clone(), b)).collect::<HashMap<_, _>>();
+    let site_map = sites.iter().map(|s| (s.id.clone(), s)).collect::<HashMap<_, _>>();
 
     for relationship in relationships {
-        if let Some(binding) = binding_map.get_mut(&(relationship.binding_id as usize)) {
-            if let Some(site) = site_map.get(&(relationship.site_id as usize)) {
+        if let Some(binding) = binding_map.get_mut(&relationship.binding_id) {
+            if let Some(site) = site_map.get(&relationship.site_id) {
                 binding.add_site((*site).clone());
             }
         }
@@ -283,14 +282,14 @@ fn load_bindings(connection: &Connection) -> Result<Vec<Binding>, String> {
 
     let mut bindings = Vec::new();
     while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute bindings query: {}", e))? {
-        let binding_id: i64 = statement.read(0).map_err(|e| format!("Failed to read binding id: {}", e))?;
+        let binding_id: String = statement.read(0).map_err(|e| format!("Failed to read binding id: {}", e))?;
         let ip: String = statement.read(1).map_err(|e| format!("Failed to read ip: {}", e))?;
         let port: i64 = statement.read(2).map_err(|e| format!("Failed to read port: {}", e))?;
         let is_admin: i64 = statement.read(3).map_err(|e| format!("Failed to read is_admin: {}", e))?;
         let is_tls: i64 = statement.read(4).map_err(|e| format!("Failed to read is_tls: {}", e))?;
 
         bindings.push(Binding {
-            id: binding_id as usize,
+            id: binding_id,
             ip,
             port: port as u16,
             is_admin: is_admin != 0,
@@ -307,7 +306,7 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
 
     let mut sites = Vec::new();
     while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute sites query: {}", e))? {
-        let site_id: i64 = statement.read(0).map_err(|e| format!("Failed to read site id: {}", e))?;
+        let site_id: String = statement.read(0).map_err(|e| format!("Failed to read site id: {}", e))?;
         let is_default: i64 = statement.read(1).map_err(|e| format!("Failed to read is_default: {}", e))?;
         let is_enabled: i64 = statement.read(2).map_err(|e| format!("Failed to read is_enabled: {}", e))?;
 
@@ -338,7 +337,7 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
         let extra_headers: Vec<HeaderKV> = extra_headers_pairs.into_iter().map(|(k, v)| HeaderKV { key: k, value: v }).collect();
 
         sites.push(Site {
-            id: site_id as usize,
+            id: site_id,
             hostnames,
             is_default: is_default != 0,
             is_enabled: is_enabled != 0,
@@ -364,12 +363,12 @@ fn load_binding_sites_relationships(connection: &Connection) -> Result<Vec<Bindi
 
     let mut binding_sites = Vec::new();
     while let sqlite::State::Row = statement.next().map_err(|e| format!("Failed to execute binding_sites query: {}", e))? {
-        let binding_id: i64 = statement.read(0).map_err(|e| format!("Failed to read binding_id: {}", e))?;
-        let site_id: i64 = statement.read(1).map_err(|e| format!("Failed to read site_id: {}", e))?;
+        let binding_id: String = statement.read(0).map_err(|e| format!("Failed to read binding_id: {}", e))?;
+        let site_id: String = statement.read(1).map_err(|e| format!("Failed to read site_id: {}", e))?;
 
         binding_sites.push(BindingSiteRelationship {
-            binding_id: binding_id as usize,
-            site_id: site_id as usize,
+            binding_id: binding_id,
+            site_id: site_id,
         });
     }
 
@@ -431,7 +430,9 @@ fn load_static_file_processors(connection: &Connection) -> Result<Vec<StaticFile
 }
 
 fn parse_comma_separated_list(input: &str, to_lowercase: bool) -> Vec<String> {
-    if input.is_empty() { Vec::new() } else {
+    if input.is_empty() {
+        Vec::new()
+    } else {
         if to_lowercase {
             input.split(',').map(|s| s.trim().to_lowercase().to_string()).collect()
         } else {

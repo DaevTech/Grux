@@ -1,6 +1,6 @@
 use crate::core::database_connection::get_database_connection;
 
-pub const CURRENT_DB_SCHEMA_VERSION: i32 = 1;
+pub const CURRENT_DB_SCHEMA_VERSION: i32 = 2;
 
 pub struct DatabaseSchema {
     pub version: i32,
@@ -53,7 +53,7 @@ fn get_init_sql() -> Vec<String> {
         .to_string(),
         // Bindings table
         "CREATE TABLE IF NOT EXISTS bindings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL PRIMARY KEY,
         ip TEXT NOT NULL,
         port INTEGER NOT NULL,
         is_admin BOOLEAN NOT NULL DEFAULT 0,
@@ -62,7 +62,7 @@ fn get_init_sql() -> Vec<String> {
         .to_string(),
         // Sites table
         "CREATE TABLE IF NOT EXISTS sites (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL PRIMARY KEY,
         is_default BOOLEAN NOT NULL DEFAULT 0,
         is_enabled BOOLEAN NOT NULL DEFAULT 1,
         hostnames TEXT NOT NULL DEFAULT '',
