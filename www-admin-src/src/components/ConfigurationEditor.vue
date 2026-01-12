@@ -1041,7 +1041,7 @@ onMounted(() => {
                                             <div class="form-field">
                                                 <label>Rewrite Functions - Pre-defined request rewrites</label>
                                                 <div class="doc-link">
-                                                    <a href="https://gruxi.eu/docs/#rewrite-functions" target="_blank">Documentation on rewrite functions</a>
+                                                    <a href="https://gruxi.org/docs/#rewrite-functions" target="_blank">Documentation on rewrite functions</a>
                                                 </div>
                                                 <div class="list-items">
                                                     <div v-for="(func, funcIndex) in site.rewrite_functions" :key="funcIndex" class="list-item">

@@ -104,7 +104,7 @@ This auto-generated password is only written on first startup, so note it down s
 
 ## Documentation
 
-[You can find documentation for Gruxi web server here](https://gruxi.eu)
+[You can find documentation for Gruxi web server here](https://gruxi.org)
 
 
 ## Help with development
@@ -141,7 +141,7 @@ Submit a PR and wait for approval. We appreciate any contribution and improvemen
 
 ## Licensing with commercial support or sponsoring
 
-Gruxi is free to use for everybody (and always will be), but if you need support in a commercial context or want to sponsor the project, let us know and we will figure out a solution. Contact us on <contact@gruxi.eu>.
+Gruxi is free to use for everybody (and always will be), but if you need support in a commercial context or want to sponsor the project, let us know and we will figure out a solution. Contact us on <contact@gruxi.org>.
 
 ## Authors
 
