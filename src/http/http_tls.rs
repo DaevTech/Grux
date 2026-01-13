@@ -1,5 +1,5 @@
 use crate::core::running_state_manager::get_running_state_manager;
-use crate::logging::syslog::{debug, info, warn};
+use crate::logging::syslog::{debug, warn};
 use rand;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::BufReader;
@@ -182,7 +182,7 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
             (cert_chain, priv_key)
         } else {
             // Generate self-signed cert with comprehensive SAN list
-            warn(format!("Generating self-signed certificate for site with hostnames: {:?}", sans));
+            debug(format!("Generating self-signed certificate for site with hostnames: {:?}", sans));
             let rcgen::CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(sans.clone()).map_err(|e| format!("Failed to generate self-signed cert: {}", e))?;
             let cert_pem = cert.pem();
             let key_pem = signing_key.serialize_pem();
@@ -199,7 +199,7 @@ pub async fn build_tls_acceptor(binding: &Binding) -> Result<TlsAcceptor, Box<dy
             // Persist generated cert/key to disk and update the site configuration
             match persist_generated_tls_for_site(site, &cert_pem, &key_pem, binding.is_admin).await {
                 Ok(cert_paths) => {
-                    info(format!("Successfully persisted generated certificate to: {:?}", cert_paths));
+                    debug(format!("Successfully persisted generated certificate to: {:?}", cert_paths));
                 }
                 Err(e) => {
                     warn(format!("Failed to persist generated certificate (will continue with in-memory cert): {}", e));
