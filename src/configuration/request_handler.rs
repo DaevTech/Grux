@@ -280,6 +280,17 @@ mod tests {
     }
 
     #[test]
+    fn test_request_handler_matches_url_wildcard_files() {
+        let mut handler = create_valid_handler();
+        handler.url_match = vec!["*.php".to_string()];
+
+        assert!(handler.matches_url("/any/path/index.php"));
+        assert!(!handler.matches_url("/php"));
+        assert!(handler.matches_url("/index.php"));
+
+    }
+
+    #[test]
     fn test_request_handler_validation_valid() {
         let handler = create_valid_handler();
         let result = handler.validate();
