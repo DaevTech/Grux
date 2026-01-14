@@ -27,6 +27,8 @@ pub struct PHPProcessor {
     // Web root
     pub local_web_root: String,   // local location for the web root
     pub fastcgi_web_root: String, // Relevant for "php-fpm" type, for web-root rewriting when passing to FastCGI handler
+    // Server software spoofing [fastcgi:SERVER_SOFTWARE] (some PHP frameworks check for this in stupid ways - Looking at you, WordPress!)
+    pub server_software_spoof: String, // Spoofed server software string
 }
 
 impl PHPProcessor {
@@ -39,6 +41,7 @@ impl PHPProcessor {
             request_timeout: 30,
             local_web_root: String::new(),
             fastcgi_web_root: String::new(),
+            server_software_spoof: "".to_string(),
         }
     }
 }
@@ -52,6 +55,7 @@ impl ProcessorTrait for PHPProcessor {
         self.fastcgi_ip_and_port = self.fastcgi_ip_and_port.trim().to_string();
         self.local_web_root = self.local_web_root.trim().to_string();
         self.fastcgi_web_root = self.fastcgi_web_root.trim().to_string();
+        self.server_software_spoof = self.server_software_spoof.trim().to_string();
     }
 
     fn validate(&self) -> Result<(), Vec<String>> {
@@ -184,6 +188,7 @@ impl ProcessorTrait for PHPProcessor {
         gruxi_request.add_calculated_data("fastcgi_uri_is_a_dir_with_index_file_inside", if uri_is_a_dir_with_index_file_inside { "true" } else { "false" });
         gruxi_request.add_calculated_data("fastcgi_local_web_root", &self.local_web_root);
         gruxi_request.add_calculated_data("fastcgi_web_root", &self.fastcgi_web_root);
+        gruxi_request.add_calculated_data("fastcgi_override_server_software", &self.server_software_spoof);
 
         // Process the FastCGI request with timeout
         match tokio::time::timeout(Duration::from_secs(self.request_timeout as u64), FastCgi::process_fastcgi_request(gruxi_request)).await {

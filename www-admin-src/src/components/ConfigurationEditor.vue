@@ -616,6 +616,7 @@ const addProcessorToSite = (siteIndex, processorType) => {
     const processorId = crypto.randomUUID();
     let newProcessor;
 
+    let newName = '';
     if (processorType === 'static') {
         if (!config.value.static_file_processors) {
             config.value.static_file_processors = [];
@@ -626,6 +627,7 @@ const addProcessorToSite = (siteIndex, processorType) => {
             web_root_index_file_list: ['index.html'],
         };
         config.value.static_file_processors.push(newProcessor);
+        newName = 'Static File Processor';
     } else if (processorType === 'php') {
         if (!config.value.php_processors) {
             config.value.php_processors = [];
@@ -640,6 +642,7 @@ const addProcessorToSite = (siteIndex, processorType) => {
             fastcgi_web_root: '',
         };
         config.value.php_processors.push(newProcessor);
+        newName = 'PHP Processor';
     } else if (processorType === 'proxy') {
         if (!config.value.proxy_processors) {
             config.value.proxy_processors = [];
@@ -659,6 +662,7 @@ const addProcessorToSite = (siteIndex, processorType) => {
             verify_tls_certificates: true,
         };
         config.value.proxy_processors.push(newProcessor);
+        newName = 'Proxy Processor';
     }
 
     // Create RequestHandler that references the processor
@@ -666,7 +670,7 @@ const addProcessorToSite = (siteIndex, processorType) => {
     const newRequestHandler = {
         id: requestHandlerId,
         is_enabled: true,
-        name: `${processorType.charAt(0).toUpperCase() + processorType.slice(1)} Processor`,
+        name: newName,
         processor_type: processorType,
         processor_id: processorId,
         url_match: ['*'],
@@ -1222,6 +1226,11 @@ onMounted(() => {
                                                                 </select>
                                                                 <input v-else v-model="processor.php_config.php_cgi_handler_id" type="text" placeholder="PHP-CGI handler UUID" />
                                                             </div>
+
+                                                            <div class="form-field">
+                                                                <label>Server software FastCGI spoof <span class="help-icon" data-tooltip="Gruxi will send 'Gruxi' as the server software string in the FastCGI headers to PHP interpreter. Some systems (looking at you WordPress...) may check this string for compatibility or security reasons. For WordPress, setting this to 'nginx' can help avoid issues with permalinks.">?</span></label>
+                                                                <input v-model="processor.php_config.server_software_spoof" type="text" placeholder="For WordPress, set this to: nginx" />
+                                                            </div>
                                                         </div>
                                                         <div v-else class="empty-association-warning-inline">⚠️ PHP processor config not found for ID: {{ processor.handler.processor_id }}</div>
                                                     </div>
@@ -1286,7 +1295,7 @@ onMounted(() => {
                                                             <div class="list-field compact">
                                                                 <label>URL Rewrites <span class="help-icon" data-tooltip="Define rules to rewrite URLs before they are sent to the upstream server, which is done as a search/replace in the full url, considering whether it should be case sensitive or not.">?</span></label>
                                                                 <div class="list-items">
-                                                                        <div v-for="(rw, rwIndex) in processor.proxy_config.url_rewrites" :key="rwIndex" class="list-item url-rewrite-item">
+                                                                    <div v-for="(rw, rwIndex) in processor.proxy_config.url_rewrites" :key="rwIndex" class="list-item url-rewrite-item">
                                                                         <div class="rewrite-row">
                                                                             <div class="rewrite-field">
                                                                                 <label class="rewrite-label">From:</label>
@@ -1296,13 +1305,12 @@ onMounted(() => {
                                                                                 <label class="rewrite-label">To:</label>
                                                                                 <input v-model="rw.to" type="text" placeholder="/new-path" class="value-input" />
                                                                             </div>
-                                                                                <button @click="processor.proxy_config.url_rewrites.splice(rwIndex, 1)" class="remove-item-button rewrite-remove-button">×</button>
+                                                                            <button @click="processor.proxy_config.url_rewrites.splice(rwIndex, 1)" class="remove-item-button rewrite-remove-button">×</button>
                                                                         </div>
                                                                         <label class="inline-checkbox">
                                                                             <input v-model="rw.is_case_insensitive" type="checkbox" />
                                                                             Is case insensitive? <span class="help-icon" data-tooltip="If enabled, the URL rewrite rule will be applied in a case-insensitive manner. Eg. if enabled, the rewrite '/API' to '/my-site-api' will also be applied to '/api', '/Api' and changed to '/my-site-api'. If not enabled, only the exact case will be matched.">?</span>
                                                                         </label>
-
                                                                     </div>
                                                                     <button @click="processor.proxy_config.url_rewrites.push({ from: '', to: '', is_case_insensitive: false })" class="add-item-button">+ Add Rewrite</button>
                                                                 </div>
@@ -1465,7 +1473,6 @@ onMounted(() => {
                                     <label>TLS Key Path <span class="help-icon" data-tooltip="Full or relative path (relative to the Gruxi server) to the TLS key file for the admin portal.">?</span></label>
                                     <input v-model="config.core.admin_portal.tls_key_path" type="text" />
                                 </div>
-
                             </div>
                         </div>
                     </div>

@@ -1,9 +1,9 @@
 use gruxi::configuration::cached_configuration::get_cached_configuration;
 use gruxi::core::command_line_args::{check_for_command_line_actions, get_command_line_args};
-use gruxi::core::database_schema;
 use gruxi::core::operation_mode::get_operation_mode;
 use gruxi::core::running_state_manager::get_running_state_manager;
 use gruxi::core::triggers::get_trigger_handler;
+use gruxi::database::database_schema::initialize_database;
 use gruxi::logging::syslog::{error, info};
 use gruxi::{admin_portal::init::initialize_admin_site, core::background_tasks::start_background_tasks};
 use tokio::select;
@@ -70,7 +70,7 @@ fn start_gruxi_basics() {
     check_for_command_line_actions();
 
     // Initialize database tables and migrations
-    if let Err(e) = database_schema::initialize_database() {
+    if let Err(e) = initialize_database() {
         error(format!("Failed to initialize database: {}", e));
         std::process::exit(1);
     }

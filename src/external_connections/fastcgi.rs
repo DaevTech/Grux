@@ -485,6 +485,11 @@ impl FastCgi {
             request_uri = format!("{}{}", path_only, query_part);
         }
 
+        let mut server_software = gruxi_request.get_calculated_data("fastcgi_override_server_software").unwrap_or("Gruxi".to_string());
+        if server_software.is_empty() {
+            server_software = "Gruxi".to_string();
+        }
+
         // Figure out PATH_INFO
         let path_info = Self::compute_path_info(&request_uri, &filename);
 
@@ -498,7 +503,7 @@ impl FastCgi {
         params.insert("DOCUMENT_ROOT".to_string(), script_web_root);
         params.insert("QUERY_STRING".to_string(), gruxi_request.get_query());
         params.insert("CONTENT_LENGTH".to_string(), gruxi_request.get_body_size().to_string());
-        params.insert("SERVER_SOFTWARE".to_string(), "Gruxi".to_string());
+        params.insert("SERVER_SOFTWARE".to_string(), server_software);
         params.insert("SERVER_NAME".to_string(), gruxi_request.get_hostname());
         params.insert("SERVER_PORT".to_string(), gruxi_request.get_server_port().to_string());
         params.insert("HTTPS".to_string(), if gruxi_request.is_https() { "on" } else { "off" }.to_string());

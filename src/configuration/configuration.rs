@@ -30,7 +30,7 @@ pub struct Configuration {
     pub php_cgi_handlers: Vec<PhpCgi>,
 }
 
-pub static CURRENT_CONFIGURATION_VERSION: i32 = 2;
+pub static CURRENT_CONFIGURATION_VERSION: i32 = 3;
 
 impl Configuration {
     pub fn new() -> Self {

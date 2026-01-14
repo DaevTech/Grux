@@ -1,5 +1,6 @@
 use crate::configuration::binding_site_relation::BindingSiteRelationship;
-use crate::core::database_schema::CURRENT_DB_SCHEMA_VERSION;
+use crate::database::database_migration::migrate_database;
+use crate::database::database_schema::{CURRENT_DB_SCHEMA_VERSION, get_schema_version, set_schema_version};
 use crate::external_connections::managed_system::php_cgi;
 use crate::http::request_handlers::processors::php_processor;
 use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor, ProxyProcessorRewrite};
@@ -10,16 +11,20 @@ use crate::{
     core::database_connection::get_database_connection,
 };
 use sqlite::Connection;
-use sqlite::State;
 use uuid::Uuid;
 
 // Load the configuration from the database or create a default one if it doesn't exist
 pub fn init() -> Result<Configuration, Vec<String>> {
-    let connection = get_database_connection().map_err(|e| vec![format!("Failed to get database connection: {}", e)])?;
-
-    // Check if we need to load the default configuration
+    // Get our current schema version from db
     let schema_version = get_schema_version();
 
+    // Determine if we need to migrate
+    if schema_version > 0 && schema_version < CURRENT_DB_SCHEMA_VERSION {
+        info(format!("Database schema version {} is older than current version {}, migrating...", schema_version, CURRENT_DB_SCHEMA_VERSION));
+        migrate_database();
+    }
+
+    // Load configuration
     let mut configuration = {
         if schema_version == 0 {
             // No schema version found, likely first run - create default configuration
@@ -28,10 +33,7 @@ pub fn init() -> Result<Configuration, Vec<String>> {
             save_configuration(&mut configuration, true)?;
 
             // Update schema version to value of constant CURRENT_CONFIGURATION_VERSION
-            let current_version = CURRENT_DB_SCHEMA_VERSION;
-            connection
-                .execute(&format!("UPDATE gruxi SET gruxi_value = {} WHERE gruxi_key = 'schema_version'", current_version))
-                .map_err(|e| vec![format!("Failed to update schema version: {}", e)])?;
+            set_schema_version(CURRENT_DB_SCHEMA_VERSION).map_err(|e| vec![format!("Failed to set schema version: {}", e)])?;
 
             configuration
         } else {
@@ -99,28 +101,6 @@ fn add_admin_portal_to_configuration(configuration: &mut Configuration) {
     configuration.static_file_processors.push(request_static_processor);
 
     configuration.bindings.push(admin_binding);
-}
-
-fn get_schema_version() -> i32 {
-    let connection_result = get_database_connection();
-    if let Err(_) = connection_result {
-        return 0;
-    }
-    let connection = connection_result.unwrap();
-
-    let statement_result = connection.prepare("SELECT gruxi_value FROM gruxi WHERE gruxi_key = 'schema_version' LIMIT 1");
-    if let Err(_) = statement_result {
-        return 0;
-    }
-    let mut statement = statement_result.unwrap();
-
-    match statement.next().unwrap() {
-        State::Row => {
-            let version: i64 = statement.read(0).unwrap_or(0);
-            version as i32
-        }
-        State::Done => 0, // No version found, assume 0
-    }
 }
 
 // Load the configuration from the normalized database tables - Returns the data from db as fresh
@@ -222,6 +202,7 @@ fn load_php_processors(connection: &Connection) -> Result<Vec<php_processor::PHP
         let request_timeout: i64 = statement.read(4).map_err(|e| format!("Failed to read request_timeout: {}", e))?;
         let local_web_root: String = statement.read(5).map_err(|e| format!("Failed to read local_web_root: {}", e))?;
         let fastcgi_web_root: String = statement.read(6).map_err(|e| format!("Failed to read fastcgi_web_root: {}", e))?;
+        let server_software_spoof: String = statement.read(7).map_err(|e| format!("Failed to read server_software_spoof: {}", e))?;
 
         processors.push(php_processor::PHPProcessor {
             id: processor_id,
@@ -231,6 +212,7 @@ fn load_php_processors(connection: &Connection) -> Result<Vec<php_processor::PHP
             request_timeout: request_timeout as u32,
             local_web_root,
             fastcgi_web_root,
+            server_software_spoof,
         });
     }
 

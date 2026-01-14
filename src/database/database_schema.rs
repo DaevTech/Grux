@@ -1,6 +1,8 @@
+use sqlite::State;
+
 use crate::core::database_connection::get_database_connection;
 
-pub const CURRENT_DB_SCHEMA_VERSION: i32 = 2;
+pub const CURRENT_DB_SCHEMA_VERSION: i32 = 3;
 
 pub struct DatabaseSchema {
     pub version: i32,
@@ -27,6 +29,36 @@ pub fn initialize_database() -> Result<(), String> {
         connection.execute(&sql).map_err(|e| format!("Failed to execute init SQL: {}. Error: {}", sql, e))?;
     }
 
+    Ok(())
+}
+
+pub fn get_schema_version() -> i32 {
+    let connection_result = get_database_connection();
+    if let Err(_) = connection_result {
+        return 0;
+    }
+    let connection = connection_result.unwrap();
+
+    let statement_result = connection.prepare("SELECT gruxi_value FROM gruxi WHERE gruxi_key = 'schema_version' LIMIT 1");
+    if let Err(_) = statement_result {
+        return 0;
+    }
+    let mut statement = statement_result.unwrap();
+
+    match statement.next().unwrap() {
+        State::Row => {
+            let version: i64 = statement.read(0).unwrap_or(0);
+            version as i32
+        }
+        State::Done => 0, // No version found, assume 0
+    }
+}
+
+pub fn set_schema_version(version: i32) -> Result<(), String> {
+    let connection = get_database_connection()?;
+    connection
+        .execute(format!("UPDATE gruxi SET gruxi_value = '{}' WHERE gruxi_key = 'schema_version';", version))
+        .map_err(|e| format!("Failed to set schema version: {}", e))?;
     Ok(())
 }
 
@@ -104,6 +136,7 @@ fn get_init_sql() -> Vec<String> {
         web_root_index_file_list TEXT NOT NULL DEFAULT ''
     );"
         .to_string(),
+        // PHP processors table
         "CREATE TABLE IF NOT EXISTS php_processors (
         id TEXT PRIMARY KEY,
         served_by_type TEXT NOT NULL DEFAULT '',
@@ -111,7 +144,8 @@ fn get_init_sql() -> Vec<String> {
         fastcgi_ip_and_port TEXT NOT NULL DEFAULT '',
         request_timeout INTEGER NOT NULL DEFAULT 30,
         local_web_root TEXT NOT NULL DEFAULT '',
-        fastcgi_web_root TEXT NOT NULL DEFAULT ''
+        fastcgi_web_root TEXT NOT NULL DEFAULT '',
+        server_software_spoof TEXT NOT NULL DEFAULT ''
     );"
         .to_string(),
         // Proxy processors table

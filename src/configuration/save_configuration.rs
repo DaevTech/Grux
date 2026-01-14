@@ -159,14 +159,15 @@ fn save_proxy_processor(connection: &Connection, processor: &ProxyProcessor) -> 
 fn save_php_processor(connection: &Connection, processor: &PHPProcessor) -> Result<(), String> {
     connection
         .execute(format!(
-            "INSERT INTO php_processors (id, served_by_type, php_cgi_handler_id, fastcgi_ip_and_port, request_timeout, local_web_root, fastcgi_web_root) VALUES ('{}', '{}', '{}', '{}', {}, '{}', '{}')",
+            "INSERT INTO php_processors (id, served_by_type, php_cgi_handler_id, fastcgi_ip_and_port, request_timeout, local_web_root, fastcgi_web_root, server_software_spoof) VALUES ('{}', '{}', '{}', '{}', {}, '{}', '{}', '{}')",
             processor.id,
             processor.served_by_type.replace("'", "''"),
             processor.php_cgi_handler_id.replace("'", "''"),
             processor.fastcgi_ip_and_port.replace("'", "''"),
             processor.request_timeout,
             processor.local_web_root.replace("'", "''"),
-            processor.fastcgi_web_root.replace("'", "''")
+            processor.fastcgi_web_root.replace("'", "''"),
+            processor.server_software_spoof.replace("'", "''")
         ))
         .map_err(|e| format!("Failed to insert PHP processor: {}", e))?;
 
