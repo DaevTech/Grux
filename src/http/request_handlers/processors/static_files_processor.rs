@@ -4,15 +4,15 @@ use crate::{
         gruxi_error::GruxiError,
         gruxi_error_enums::{GruxiErrorKind, StaticFileProcessorError},
     },
-    file::file_util::{check_path_secure, get_full_file_path},
+    file::{file_util::check_path_secure, normalized_path::NormalizedPath},
     http::{
-        http_util::{resolve_web_root_and_path_and_get_file},
+        http_util::resolve_web_root_and_path_and_get_file,
         request_handlers::processor_trait::ProcessorTrait,
         request_response::{gruxi_request::GruxiRequest, gruxi_response::GruxiResponse},
     },
     logging::syslog::{error, trace},
 };
-use hyper::{header::HeaderValue};
+use hyper::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,6 +21,10 @@ pub struct StaticFileProcessor {
     pub id: String,                            // Unique identifier for the processor
     pub web_root: String,                      // Web root directory for static files
     pub web_root_index_file_list: Vec<String>, // List of index files to look for in directories
+
+    // Calculated fields (not serialized)
+    #[serde(skip)]
+    normalized_web_root: Option<NormalizedPath>,
 }
 
 impl StaticFileProcessor {
@@ -30,11 +34,24 @@ impl StaticFileProcessor {
             id,
             web_root,
             web_root_index_file_list,
+            normalized_web_root: None,
         }
     }
 }
 
 impl ProcessorTrait for StaticFileProcessor {
+    fn initialize(&mut self) {
+        // Check and normalize web root if not already done
+        if self.normalized_web_root.is_none() {
+            let normalized_path_result = NormalizedPath::new(&self.web_root, "");
+            if normalized_path_result.is_err() {
+                error(format!("Failed to normalize web root path: {}", self.web_root));
+                return;
+            }
+            self.normalized_web_root = Some(normalized_path_result.unwrap());
+        }
+    }
+
     fn sanitize(&mut self) {
         // Trim whitespace from web root
         self.web_root = self.web_root.trim().to_string();
@@ -61,6 +78,12 @@ impl ProcessorTrait for StaticFileProcessor {
             errors.push("Web root cannot be empty".to_string());
         }
 
+        // Validate that web root can be normalized
+        let normalized_path_result = NormalizedPath::new(&self.web_root, "");
+        if normalized_path_result.is_err() {
+            errors.push(format!("Web root path is invalid: '{}' - Check strange characters and path format", self.web_root));
+        }
+
         // Validate index file list
         for (idx, file) in self.web_root_index_file_list.iter().enumerate() {
             if file.trim().is_empty() {
@@ -72,17 +95,27 @@ impl ProcessorTrait for StaticFileProcessor {
     }
 
     async fn handle_request(&self, gruxi_request: &mut GruxiRequest, site: &Site) -> Result<GruxiResponse, GruxiError> {
-        // First, check if there is a specific file requested
-        let web_root_result = get_full_file_path(&self.web_root);
-        if let Err(e) = web_root_result {
-            error(format!("Failed to get full web root path: {} for site: {:?}", e, site));
-            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::PathError(e))));
+        // Check and normalize web root if not already done
+        if self.normalized_web_root.is_none() {
+            error(format!("StaticFileProcessor web root is not initialized as expected for id: '{}'", self.id));
+            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
         }
-        let web_root = web_root_result.unwrap();
+
+        // Get our web root and requested path
+        let web_root = self.normalized_web_root.as_ref().unwrap().get_full_path();
+
         let mut path = gruxi_request.get_path().clone();
 
-        // Get the cached file, if it exists
-        let file_data_result = resolve_web_root_and_path_and_get_file(&web_root, &path).await;
+        // Get the file, if it exists
+        let normalized_path_result = NormalizedPath::new(&web_root, &path);
+
+        if let Err(_) = normalized_path_result {
+            error(format!("Failed to normalize request path: {}", path));
+            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
+        }
+        let normalized_path = normalized_path_result.unwrap();
+
+        let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
         if let Err(e) = file_data_result {
             // If we fail to get the file, return cant/wont handle
             error(format!("We could not get data on the file: {}, so we cannot handle with static file processor", e));
@@ -100,13 +133,20 @@ impl ProcessorTrait for StaticFileProcessor {
                 path = "/".to_string();
 
                 // Get the cached file, if it exists
-                let file_data_result = resolve_web_root_and_path_and_get_file(&web_root, &path).await;
-                if let Err(e) = file_data_result {
+                let normalized_path_result = NormalizedPath::new(&web_root, &path);
+                if let Err(_) = normalized_path_result {
+                    error(format!("Failed to normalize request path: {}", path));
+                    return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
+                }
+                let normalized_path = normalized_path_result.unwrap();
+
+                let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
+                if let Err(_) = file_data_result {
                     trace(format!(
                         "File does not exist, even after rewrite function is applied: {}, so we cannot handle with static file processor",
                         file_path
                     ));
-                    return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::PathError(e))));
+                    return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
                 }
                 file_data = file_data_result.unwrap();
                 file_path = file_data.meta.file_path.clone();
@@ -126,8 +166,15 @@ impl ProcessorTrait for StaticFileProcessor {
             // Check if we can find a index file in the directory
             let mut found_index = false;
             for file in &self.web_root_index_file_list {
-                // Get the cached file, if it exists
-                let file_data_result = resolve_web_root_and_path_and_get_file(&file_path, &file).await;
+                // Get the file, if it exists
+                let normalized_path_result = NormalizedPath::new(&file_path, &file);
+                if let Err(_) = normalized_path_result {
+                    trace(format!("Failed to normalize path: {} and file: {}", file_path, file));
+                    continue;
+                }
+                let normalized_path = normalized_path_result.unwrap();
+
+                let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
                 if let Err(_) = file_data_result {
                     trace(format!("Index files in dir does not exist: {}", file_path));
                     continue;
@@ -150,7 +197,7 @@ impl ProcessorTrait for StaticFileProcessor {
             }
         }
 
-        // Do a safety check of the path, make sure it's still under the web root and not blocked
+        // Do a safety check of the path, make sure it's still under the web root and not blocked file extension
         if !check_path_secure(&web_root, &file_path).await {
             trace(format!("File path is not secure: {}", file_path));
             // We should probably not reveal that the file is blocked, so we return a 404

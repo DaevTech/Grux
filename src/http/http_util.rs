@@ -5,81 +5,18 @@ use hyper::body::Bytes;
 
 use crate::core::running_state_manager::get_running_state_manager;
 use crate::file::file_reader_structs::FileEntry;
-use crate::file::file_util::get_full_file_path;
+use crate::file::normalized_path::NormalizedPath;
 use crate::http::request_response::gruxi_response::GruxiResponse;
-use crate::logging::syslog::trace;
 
 pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into()).map_err(|never| match never {}).boxed()
 }
 
-pub fn clean_url_path(path: &str) -> String {
-    let mut buf = String::with_capacity(path.len());
-    let mut chars = path.trim_start_matches('/').chars().peekable();
-    let mut prev_was_slash = false;
-
-    while let Some(c) = chars.next() {
-        let decoded = if c == '%' {
-            let code: String = chars.by_ref().take(2).collect();
-            match code.as_str() {
-                "20" => Some(' '),
-                "2F" | "5C" => Some('/'),
-                _ => {
-                    buf.push('%');
-                    buf.push_str(&code);
-                    None
-                }
-            }
-        } else if c == '\\' {
-            Some('/')
-        } else {
-            Some(c)
-        };
-
-        if let Some(ch) = decoded {
-            if ch == '/' {
-                if prev_was_slash {
-                    continue; // skip duplicate slashes
-                }
-                prev_was_slash = true;
-            } else {
-                prev_was_slash = false;
-            }
-            buf.push(ch);
-        }
-    }
-
-    // Remove trailing slash
-    while buf.ends_with('/') {
-        buf.pop();
-    }
-
-    // Remove "." and ".." segments
-    let mut parts = Vec::new();
-    for part in buf.split('/') {
-        match part {
-            "" | "." | ".." => continue,
-            _ => parts.push(part),
-        }
-    }
-
-    // Join parts and ensure no trailing slash
-    let result = parts.join("/");
-
-    // Final safety check - ensure we never return a trailing slash
-    if result.ends_with('/') { result[..result.len() - 1].to_string() } else { result }
-}
-
-// Combine the web root and path, and resolve to a full path
-pub async fn resolve_web_root_and_path_and_get_file(web_root: &str, path: &str) -> Result<Arc<FileEntry>, std::io::Error> {
-    let path_cleaned = clean_url_path(&path);
-    let mut file_path = format!("{}/{}", web_root, path_cleaned);
-    trace(format!("Resolved file path for resolving: {}", file_path));
-    file_path = get_full_file_path(&file_path)?;
-
+/// Combine the web root and path, and resolve to a full path
+pub async fn resolve_web_root_and_path_and_get_file(normalized_path: &NormalizedPath) -> Result<Arc<FileEntry>, std::io::Error> {
     let running_state = get_running_state_manager().await.get_running_state_unlocked().await;
     let file_reader_cache = running_state.get_file_reader_cache();
-    let file_data = file_reader_cache.get_file(&file_path).await.unwrap();
+    let file_data = file_reader_cache.get_file(&normalized_path.get_full_path()).await?;
     Ok(file_data)
 }
 

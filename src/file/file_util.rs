@@ -1,59 +1,6 @@
 use crate::logging::syslog::trace;
 use cached::proc_macro::cached;
-use std::env;
-use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
-
-use crate::http::file_pattern_matching::{get_blocked_file_pattern_matching, get_whitelisted_file_pattern_matching};
-
-/// Sanitizes and resolves a file path into an absolute path.
-/// - Expands relative paths to absolute.
-/// - Normalizes separators to `/`.
-/// - Cleans up `.` and `..`.
-/// - Removes duplicate separators.
-/// Works on both Windows and Unix.
-#[cached(
-    size = 100,
-    time = 10, // Cache for 10 seconds
-    result = true,
-    key = "String",
-    convert = r#"{ input_path.to_string() }"#
-)]
-pub fn get_full_file_path(input_path: &String) -> Result<String, std::io::Error> {
-    let mut path = PathBuf::new();
-
-    // If relative, start from current dir
-    if Path::new(&input_path).is_relative() {
-        let current_dir_result = env::current_dir()?;
-        path.push(current_dir_result);
-    }
-
-    path.push(&input_path);
-
-    // Normalize components manually
-    let mut normalized = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {
-                // Skip "."
-            }
-            Component::ParentDir => {
-                // Skip ".."
-            }
-            other => normalized.push(other),
-        }
-    }
-
-    // Convert to string and normalize slashes
-    let mut result = normalized.to_string_lossy().replace('\\', "/");
-
-    // Remove duplicate slashes (// → /)
-    while result.contains("//") {
-        result = result.replace("//", "/");
-    }
-
-    Ok(result)
-}
 
 /// Splits `path_str` into (relative_dir, file_name) based on `base_path`.
 /// - If `path_str` starts with `base_path`, returns (base_path, remaining_path).
@@ -94,34 +41,34 @@ pub fn replace_web_root_in_path(original_path: &str, old_web_root: &str, new_web
     }
 }
 
-// Check that the path is secure, by these tests:
-// - The path starts with the base path, to prevent directory traversal attacks
-// - The path does not contain any of the blocked file patterns
+/// Check that the path is secure, by these tests:
+/// - The path starts with the base path, to prevent directory traversal attacks
+/// - The path does not contain any of the blocked file patterns
+/// - Returns true if the path is secure, false otherwise
+/// Used primarily by static file processors, to ensure that files being served are safe
+/// Expected that both base_path and test_path are normalized paths without junk!
 pub async fn check_path_secure(base_path: &str, test_path: &str) -> bool {
     // Check that the test_path starts with the base_path
-    let base_path_cleaned = base_path.replace('\\', "/").trim_end_matches('/').to_string();
-    let test_path_cleaned = test_path.replace('\\', "/");
-    if !test_path_cleaned.starts_with(&base_path_cleaned) {
-        trace(format!("Path is blocked, as it does not start with the web root: {} file: {}", base_path_cleaned, test_path_cleaned));
+    if !test_path.starts_with(base_path) {
+        trace(format!("Path is blocked, as it does not start with the web root: {} file: {}", base_path, test_path));
         return false;
     }
 
-    let (_path, file) = split_path(&base_path_cleaned, &test_path_cleaned);
+    let (_path, file) = split_path(base_path, test_path);
 
-    trace(format!("Check if file pattern is blocked or whitelisted: {}", &file));
-
-    // Check if it is whitelisted first
-    let pattern_whitelisting = get_whitelisted_file_pattern_matching().await;
-    if pattern_whitelisting.is_file_pattern_whitelisted(&test_path_cleaned) {
-        trace(format!("File pattern is whitelisted: {}", &test_path_cleaned));
-        return true;
-    }
+    trace(format!("Check if file pattern is blocked because of extension: {}", &file));
 
     // Check the blacklisted file patterns
-    let pattern_blocking = get_blocked_file_pattern_matching().await;
-    if pattern_blocking.is_file_pattern_blocked(&file) {
-        trace(format!("File pattern is blocked: {}", &file));
-        return false;
+    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+    let config = cached_configuration.get_configuration().await;
+
+    // Run through blocked patterns and see if any match
+    let file_lowercase = file.to_lowercase();
+    for pattern in &config.core.server_settings.blocked_file_patterns {
+        if file_lowercase.contains(pattern) {
+            trace(format!("Path is blocked due to blocked file pattern: {} file: {}", pattern, test_path));
+            return false;
+        }
     }
 
     true
@@ -131,79 +78,19 @@ pub async fn check_path_secure(base_path: &str, test_path: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_full_path_is_unchanged() {
-        let cwd = env::current_dir().unwrap();
-        let abs = cwd.join("foo/bar.txt");
-        let abs_str = abs.to_string_lossy().replace('\\', "/");
-        let result = get_full_file_path(&abs_str).unwrap();
-        assert_eq!(result, abs_str);
-    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_check_path_secure_blocked_extensions_matching() {
+        assert!(check_path_secure("/var/www", "/var/www/index.html").await);
+        assert!(check_path_secure("/var/www", "/var/www/styles.css").await);
+        assert!(check_path_secure("/var/www", "/var/www/mysubdir/styles.css").await);
 
-    #[test]
-    fn test_relative_path_is_expanded() {
-        let cwd = env::current_dir().unwrap();
-        let rel = "foo/bar.txt";
-        let expected = cwd.join(rel).to_string_lossy().replace('\\', "/");
-        let result = get_full_file_path(&rel.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_dot_and_dotdot_are_cleaned() {
-        let cwd = env::current_dir().unwrap();
-        let rel = "foo/./bar/../baz.txt";
-        let expected = cwd.join("foo/baz.txt").to_string_lossy().replace('\\', "/");
-        let result = get_full_file_path(&rel.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_duplicate_slashes() {
-        let cwd = env::current_dir().unwrap();
-        let rel = "foo//bar///baz.txt";
-        let expected = cwd.join("foo/bar/baz.txt").to_string_lossy().replace('\\', "/");
-        let result = get_full_file_path(&rel.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_windows_path() {
-        // Simulate a Windows-style path on any platform
-        let cwd = env::current_dir().unwrap();
-        let rel = "foo\\bar\\baz.txt";
-        let expected = cwd.join("foo/bar/baz.txt").to_string_lossy().replace('\\', "/");
-        let result = get_full_file_path(&rel.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_absolute_windows_path_cross_platform() {
-        // This test ensures Windows-style absolute paths are normalized on all platforms
-        let win_abs = "C:\\foo\\bar.txt";
-        let expected = "C:/foo/bar.txt";
-        let result = get_full_file_path(&win_abs.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_absolute_windows_path_native() {
-        // Only run this test on Windows for platform-specific normalization
-        let win_abs = "C:\\foo\\bar.txt";
-        let expected = "C:/foo/bar.txt";
-        let result = get_full_file_path(&win_abs.to_string()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_absolute_linux_path() {
-        let abs = "/tmp/foo/bar.txt";
-        let expected = "/tmp/foo/bar.txt";
-        let result = get_full_file_path(&abs.to_string()).unwrap();
-        assert_eq!(result, expected);
+        assert!(!check_path_secure("/var/www", "/var/www/index.php").await);
+        assert!(!check_path_secure("/var/www", "/var/index.html").await);
+        assert!(!check_path_secure("/var/www/html", "/var/www/index.php").await);
+        assert!(!check_path_secure("/var/www/html", "/index.php").await);
+        assert!(!check_path_secure("/var/www/html", "/etc/passwd").await);
+        assert!(!check_path_secure("/var/www", "/var/www/index.key").await);
+        assert!(!check_path_secure("/var/www", "/var/www/index.pem").await);
     }
 
     #[test]

@@ -74,6 +74,23 @@ const loadConfiguration = async () => {
             const data = await response.json();
             originalConfig.value = JSON.parse(JSON.stringify(data)); // Deep copy
             config.value = data;
+
+            // Ensure server_settings exists for older configs
+            if (!config.value.core) {
+                config.value.core = {};
+            }
+            if (!config.value.core.server_settings) {
+                config.value.core.server_settings = {
+                    max_body_size: 10 * 1024 * 1024,
+                    blocked_file_patterns: [],
+                };
+            }
+            if (config.value.core.server_settings.max_body_size === null || config.value.core.server_settings.max_body_size === undefined) {
+                config.value.core.server_settings.max_body_size = 10 * 1024 * 1024;
+            }
+            if (!Array.isArray(config.value.core.server_settings.blocked_file_patterns)) {
+                config.value.core.server_settings.blocked_file_patterns = [];
+            }
         } else {
             error.value = 'Failed to load configuration';
         }
@@ -483,6 +500,23 @@ const removeHostname = (siteIndex, hostnameIndex) => {
     }
 };
 
+// ========== Core -> Server Settings ==========
+
+const addBlockedFilePattern = () => {
+    if (!config.value?.core?.server_settings) return;
+    if (!Array.isArray(config.value.core.server_settings.blocked_file_patterns)) {
+        config.value.core.server_settings.blocked_file_patterns = [];
+    }
+    config.value.core.server_settings.blocked_file_patterns.push('.tmp');
+};
+
+const removeBlockedFilePattern = (patternIndex) => {
+    if (!config.value?.core?.server_settings?.blocked_file_patterns) return;
+    if (config.value.core.server_settings.blocked_file_patterns.length > patternIndex) {
+        config.value.core.server_settings.blocked_file_patterns.splice(patternIndex, 1);
+    }
+};
+
 // Add enabled handler to site
 const addEnabledHandler = (siteIndex) => {
     if (config.value.sites && config.value.sites[siteIndex]) {
@@ -774,6 +808,15 @@ const fileCacheMaxSizePerFileMb = computed({
     set: (value) => {
         if (config.value?.core?.file_cache) {
             config.value.core.file_cache.cache_max_size_per_file = mbToBytes(value);
+        }
+    },
+});
+
+const serverMaxBodySizeMb = computed({
+    get: () => (config.value?.core?.server_settings?.max_body_size ? bytesToMb(config.value.core.server_settings.max_body_size) : 0),
+    set: (value) => {
+        if (config.value?.core?.server_settings) {
+            config.value.core.server_settings.max_body_size = mbToBytes(value);
         }
     },
 });
@@ -1453,6 +1496,58 @@ onMounted(() => {
                 </div>
 
                 <div v-if="expandedSections.core" class="section-content">
+                    <!-- Base settings -->
+                    <div class="binding-item">
+                        <div class="item-header compact" @click="toggleCoreSubsection('baseSettings')">
+                            <div class="header-left">
+                                <span class="section-icon" :class="{ expanded: isCoreSubsectionExpanded('baseSettings') }">▶</span>
+                                <span class="hierarchy-indicator">⚙️</span>
+                                <h4>Base settings</h4>
+                            </div>
+                        </div>
+
+                        <div v-if="isCoreSubsectionExpanded('baseSettings')" class="item-content">
+                            <div class="form-grid compact">
+                                <div class="form-field">
+                                    <label>
+                                        Max Body Size (MB)
+                                        <span class="help-icon" data-tooltip="Maximum allowed HTTP request body size, in megabytes. This is applied server-wide.">?</span>
+                                    </label>
+                                    <input v-model.number="serverMaxBodySizeMb" type="number" min="0.01" step="0.01" />
+                                </div>
+
+                                <div class="form-field full-width">
+                                    <div class="compact">
+                                        <label>
+                                            Blocked File Patterns
+                                            <span class="help-icon" data-tooltip="File extensions to block from being served by static file handlers (e.g. .php, .sql). Each value must start with a dot. When a client requests a blocked file they will see a HTTP 404 error, so it just seems like it is not found.">?</span>
+                                        </label>
+                                        <div class="tag-field">
+                                            <span v-for="(pattern, patternIndex) in (config.core.server_settings.blocked_file_patterns || [])" :key="patternIndex" class="tag-item">
+                                                {{ pattern }}
+                                                <button @click="removeBlockedFilePattern(patternIndex)" class="tag-remove-button" type="button">×</button>
+                                            </span>
+                                            <input
+                                                type="text"
+                                                class="tag-input"
+                                                placeholder="Add pattern... (e.g. .bak)"
+                                                @keydown.enter.prevent="
+                                                    (e) => {
+                                                        if (e.target.value.trim()) {
+                                                            addBlockedFilePattern();
+                                                            config.core.server_settings.blocked_file_patterns[config.core.server_settings.blocked_file_patterns.length - 1] = e.target.value.trim();
+                                                            e.target.value = '';
+                                                        }
+                                                    }
+                                                "
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Admin portal Settings -->
                     <div class="binding-item">
                         <div class="item-header compact" @click="toggleCoreSubsection('adminPortal')">

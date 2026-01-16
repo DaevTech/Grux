@@ -1,5 +1,4 @@
 use crate::error::gruxi_error_enums::FastCgiError;
-use crate::file::file_util::get_full_file_path;
 use crate::file::file_util::replace_web_root_in_path;
 use crate::file::file_util::split_path;
 use crate::http::http_util::full;
@@ -459,12 +458,7 @@ impl FastCgi {
         let uri_is_a_dir_with_index_file_inside = gruxi_request.get_calculated_data("fastcgi_uri_is_a_dir_with_index_file_inside").unwrap_or("false".to_string()) == "true";
 
         if !other_webroot.is_empty() {
-            let full_local_web_root_result = get_full_file_path(&script_web_root);
-            if let Err(e) = full_local_web_root_result {
-                trace(format!("Error resolving file path for local web root {}: {}", script_web_root, e));
-                return Err(());
-            }
-            let full_local_web_root = full_local_web_root_result.unwrap();
+            let full_local_web_root = script_web_root;
             full_script_path = replace_web_root_in_path(&full_script_path, &full_local_web_root, &other_webroot);
             script_web_root = other_webroot.clone();
         }

@@ -2,19 +2,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerSettings {
-    pub max_body_size: usize, // in bytes
+    pub max_body_size: u64, // in bytes
     pub blocked_file_patterns: Vec<String>,
-    pub whitelisted_file_patterns: Vec<String>,
 }
 
 impl ServerSettings {
     pub fn sanitize(&mut self) {
-
-
+        // Ensure blocked file patterns are lowercase for consistent matching and remove any asterisk before extension
+        self.blocked_file_patterns = self.blocked_file_patterns.iter().map(|p| p.to_lowercase().replace("*", "")).collect();
     }
 
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
+
+        // Validate blocked file pattern, ensure they start with a dot
+        for pattern in &self.blocked_file_patterns {
+            if !pattern.starts_with('.') {
+                errors.push(format!("Blocked file pattern must start with a dot: {}", pattern));
+            }
+        }
 
         // Validate max_body_size
         if self.max_body_size == 0 {

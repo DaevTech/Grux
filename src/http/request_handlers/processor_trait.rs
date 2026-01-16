@@ -6,6 +6,9 @@ use crate::{
 // Trait that processors must implement
 #[allow(async_fn_in_trait)]
 pub trait ProcessorTrait {
+    // Initialize the processor
+    fn initialize(&mut self);
+
     // Sanitize
     fn sanitize(&mut self);
 

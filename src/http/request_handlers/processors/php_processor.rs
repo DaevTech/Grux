@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::error::gruxi_error::GruxiError;
 use crate::error::gruxi_error_enums::{GruxiErrorKind, PHPProcessorError};
 use crate::external_connections::fastcgi::FastCgi;
-use crate::file::file_util::get_full_file_path;
+use crate::file::normalized_path::NormalizedPath;
 use crate::http::http_util::resolve_web_root_and_path_and_get_file;
 use crate::http::request_response::gruxi_response::GruxiResponse;
 use crate::logging::syslog::{debug, error, trace};
@@ -29,6 +29,12 @@ pub struct PHPProcessor {
     pub fastcgi_web_root: String, // Relevant for "php-fpm" type, for web-root rewriting when passing to FastCGI handler
     // Server software spoofing [fastcgi:SERVER_SOFTWARE] (some PHP frameworks check for this in stupid ways - Looking at you, WordPress!)
     pub server_software_spoof: String, // Spoofed server software string
+
+    // Calculated fields (not serialized)
+    #[serde(skip)]
+    normalized_local_web_root: Option<NormalizedPath>,
+    #[serde(skip)]
+    normalized_fastcgi_web_root: Option<NormalizedPath>,
 }
 
 impl PHPProcessor {
@@ -42,11 +48,33 @@ impl PHPProcessor {
             local_web_root: String::new(),
             fastcgi_web_root: String::new(),
             server_software_spoof: "".to_string(),
+            normalized_local_web_root: None,
+            normalized_fastcgi_web_root: None,
         }
     }
 }
 
 impl ProcessorTrait for PHPProcessor {
+    fn initialize(&mut self) {
+        // Check and normalize web roots if not already done
+        if self.normalized_local_web_root.is_none() {
+            let normalized_path_result = NormalizedPath::new(&self.local_web_root, "");
+            if normalized_path_result.is_err() {
+                error(format!("Failed to normalize local web root path: {}", self.local_web_root));
+                return;
+            }
+            self.normalized_local_web_root = Some(normalized_path_result.unwrap());
+        }
+        if self.normalized_fastcgi_web_root.is_none() {
+            let normalized_path_result = NormalizedPath::new(&self.fastcgi_web_root, "");
+            if normalized_path_result.is_err() {
+                error(format!("Failed to normalize FastCGI web root path: {}", self.fastcgi_web_root));
+                return;
+            }
+            self.normalized_fastcgi_web_root = Some(normalized_path_result.unwrap());
+        }
+    }
+
     fn sanitize(&mut self) {
         // Trim strings
         self.id = self.id.trim().to_string();
@@ -96,21 +124,41 @@ impl ProcessorTrait for PHPProcessor {
             errors.push("PHP Processor: FastCGI web root must be set to web root served by PHP-FPM.".to_string());
         }
 
+        // Validate that local web root can be normalized
+        let normalized_local_web_root_result = NormalizedPath::new(&self.local_web_root, "");
+        if normalized_local_web_root_result.is_err() {
+            errors.push(format!("Local web root path is invalid: '{}' - Check strange characters and path format", self.local_web_root));
+        }
+
+        // Validate that fastcgi web root can be normalized
+        if self.served_by_type == "php-fpm" {
+            let normalized_fastcgi_web_root_result = NormalizedPath::new(&self.fastcgi_web_root, "");
+            if normalized_fastcgi_web_root_result.is_err() {
+                errors.push(format!("FastCGI web root path is invalid: '{}' - Check strange characters and path format", self.fastcgi_web_root));
+            }
+        }
+
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     async fn handle_request(&self, gruxi_request: &mut GruxiRequest, site: &Site) -> Result<GruxiResponse, GruxiError> {
-        // First we need to determine if and how to handle the request, based on the web root and the files that allow us to
-        let web_root_result = get_full_file_path(&self.local_web_root);
-        if let Err(e) = web_root_result {
-            error(format!("Failed to get full web root path: {}", e));
-            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::PathError(e))));
+        // Get our web roots, based on normalized paths, so we know they are safe
+        if self.normalized_local_web_root.is_none() || self.normalized_fastcgi_web_root.is_none() {
+            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::FileNotFound)));
         }
-        let web_root = web_root_result.unwrap();
+        let local_web_root = self.normalized_local_web_root.as_ref().unwrap().get_full_path();
+        let fastcgi_web_root = self.normalized_fastcgi_web_root.as_ref().unwrap().get_full_path();
+
         let mut path = gruxi_request.get_path().clone();
 
-        // Get the cached file, if it exists
-        let file_data_result = resolve_web_root_and_path_and_get_file(&web_root, &path).await;
+        // Get the file, if it exists
+        let normalized_path_result = NormalizedPath::new(&local_web_root, &path);
+        if normalized_path_result.is_err() {
+            return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::FileNotFound)));
+        }
+        let normalized_path = normalized_path_result.unwrap();
+
+        let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
         if let Err(e) = file_data_result {
             return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::PathError(e))));
         }
@@ -126,7 +174,12 @@ impl ProcessorTrait for PHPProcessor {
                 path = "/index.php".to_string();
 
                 // Check if the index file exists
-                let file_data_result = resolve_web_root_and_path_and_get_file(&web_root, &path).await;
+                let normalized_path_result = NormalizedPath::new(&local_web_root, &path);
+                if let Err(_) = normalized_path_result {
+                    return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::FileNotFound)));
+                }
+                let normalized_path = normalized_path_result.unwrap();
+                let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
                 if let Err(e) = file_data_result {
                     return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::PathError(e))));
                 }
@@ -142,7 +195,13 @@ impl ProcessorTrait for PHPProcessor {
             // If it's a directory, we will try to check if there is an index.php file inside
             trace(format!("File is a directory: {}", file_path));
 
-            let file_data_result = resolve_web_root_and_path_and_get_file(&file_path, "/index.php").await;
+            let normalized_path_result = NormalizedPath::new(&file_path, "/index.php");
+            if let Err(_) = normalized_path_result {
+                return Err(GruxiError::new_with_kind_only(GruxiErrorKind::PHPProcessor(PHPProcessorError::FileNotFound)));
+            }
+            let normalized_path = normalized_path_result.unwrap();
+
+            let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
             if file_data_result.is_err() {
                 trace(format!("Did not find index file: {}", file_path));
                 return Ok(empty_response_with_status(hyper::StatusCode::NOT_FOUND));
@@ -186,8 +245,8 @@ impl ProcessorTrait for PHPProcessor {
         gruxi_request.add_calculated_data("fastcgi_connect_ip_and_port", &connect_ip_and_port);
         gruxi_request.add_calculated_data("fastcgi_script_file", &file_path);
         gruxi_request.add_calculated_data("fastcgi_uri_is_a_dir_with_index_file_inside", if uri_is_a_dir_with_index_file_inside { "true" } else { "false" });
-        gruxi_request.add_calculated_data("fastcgi_local_web_root", &self.local_web_root);
-        gruxi_request.add_calculated_data("fastcgi_web_root", &self.fastcgi_web_root);
+        gruxi_request.add_calculated_data("fastcgi_local_web_root", &local_web_root);
+        gruxi_request.add_calculated_data("fastcgi_web_root", &fastcgi_web_root);
         gruxi_request.add_calculated_data("fastcgi_override_server_software", &self.server_software_spoof);
 
         // Process the FastCGI request with timeout

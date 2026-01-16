@@ -7,7 +7,7 @@ use crate::core::operation_mode::{get_operation_mode_as_string, is_valid_operati
 use crate::core::triggers::get_trigger_handler;
 use crate::error::gruxi_error::GruxiError;
 use crate::error::gruxi_error_enums::{AdminApiError, GruxiErrorKind};
-use crate::http::http_util::clean_url_path;
+use crate::file::normalized_path::{NormalizedPath};
 use crate::http::request_response::gruxi_request::GruxiRequest;
 use crate::http::request_response::gruxi_response::GruxiResponse;
 use crate::logging::syslog::{debug, error, info, trace};
@@ -19,33 +19,40 @@ use tokio_util::bytes;
 
 pub async fn handle_api_routes(gruxi_request: &mut GruxiRequest, site: &Site) -> Result<GruxiResponse, GruxiError> {
     let path = gruxi_request.get_path();
-    let path_cleaned = clean_url_path(&path);
     let method = gruxi_request.get_http_method();
+
+    let normalized_path_result = NormalizedPath::new("", &path);
+    if normalized_path_result.is_err() {
+        trace(format!("Failed to normalize path: {}", path));
+        return Err(GruxiError::new_with_kind_only(GruxiErrorKind::AdminApi(AdminApiError::InvalidRequest)));
+    }
+    let normalized_path = normalized_path_result.unwrap();
+    let path_cleaned = normalized_path.get_path();
 
     trace(format!("Handling request for admin portal with path: {}", path_cleaned));
 
     // We only want to handle a few paths in the admin portal
-    let response_result = if path_cleaned == "login" && method == "POST" {
+    let response_result = if path_cleaned == "/login" && method == "POST" {
         handle_login_request(gruxi_request, site).await
-    } else if path_cleaned == "logout" && method == "POST" {
+    } else if path_cleaned == "/logout" && method == "POST" {
         handle_logout_request(gruxi_request, site).await
-    } else if path_cleaned == "basic" && method == "GET" {
+    } else if path_cleaned == "/basic" && method == "GET" {
         admin_get_basic_data_endpoint(gruxi_request, site).await
-    } else if path_cleaned == "config" && method == "GET" {
+    } else if path_cleaned == "/config" && method == "GET" {
         admin_get_configuration_endpoint(gruxi_request, site).await
-    } else if path_cleaned == "config" && method == "POST" {
+    } else if path_cleaned == "/config" && method == "POST" {
         admin_post_configuration_endpoint(gruxi_request, site).await
-    } else if path_cleaned == "monitoring" && method == "GET" {
+    } else if path_cleaned == "/monitoring" && method == "GET" {
         admin_monitoring_endpoint(gruxi_request, site).await
-    } else if path_cleaned == "healthcheck" && method == "GET" {
+    } else if path_cleaned == "/healthcheck" && method == "GET" {
         admin_healthcheck_endpoint(gruxi_request, site).await
-    } else if (path_cleaned == "logs" || path_cleaned.starts_with("logs/")) && method == "GET" {
+    } else if (path_cleaned == "/logs" || path_cleaned.starts_with("/logs/")) && method == "GET" {
         admin_logs_endpoint(gruxi_request, site).await
-    } else if (path_cleaned == "configuration/reload") && method == "POST" {
+    } else if (path_cleaned == "/configuration/reload") && method == "POST" {
         admin_post_configuration_reload(gruxi_request, site).await
-    } else if path_cleaned == "operation-mode" && method == "GET" {
+    } else if path_cleaned == "/operation-mode" && method == "GET" {
         admin_get_operation_mode_endpoint(gruxi_request, site).await
-    } else if path_cleaned == "operation-mode" && method == "POST" {
+    } else if path_cleaned == "/operation-mode" && method == "POST" {
         admin_post_operation_mode_endpoint(gruxi_request, site).await
     } else {
         // If we reach here, no matching admin API route was found

@@ -70,14 +70,19 @@ impl Configuration {
                 server_settings: ServerSettings {
                     max_body_size: 10 * 1024 * 1024, // 10 MB
                     blocked_file_patterns: vec![
-                        "*.tmp".to_string(),
-                        "*.log".to_string(),
-                        "*.bak".to_string(),
-                        "*.config".to_string(),
-                        ".*".to_string(),
-                        "*.php".to_string(),
-                    ],
-                    whitelisted_file_patterns: vec!["*/.well-known/*".to_string()],
+                        ".tmp".to_string(),
+                        ".config".to_string(),
+                        ".php".to_string(),
+                        ".sql".to_string(),
+                        ".bak".to_string(),
+                        ".old".to_string(),
+                        ".orig".to_string(),
+                        ".conf".to_string(),
+                        ".ini".to_string(),
+                        ".log".to_string(),
+                        ".key".to_string(),
+                        ".pem".to_string(),
+                    ]
                 },
                 admin_portal: AdminPortal::new(),
             },

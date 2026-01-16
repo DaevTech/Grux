@@ -281,7 +281,7 @@ impl FileReaderCache {
 }
 
 impl FileEntry {
-    pub async fn get_content_stream(&self, gruxi_request: &GruxiRequest) -> (BoxBody<Bytes, BodyError>, String) {
+    pub async fn get_content_stream(&self, gruxi_request: &mut GruxiRequest) -> (BoxBody<Bytes, BodyError>, String) {
         let accept_encoding_headers = gruxi_request.get_accepted_encodings();
 
         if self.content.raw.is_none() && self.content.gzip.is_none() {

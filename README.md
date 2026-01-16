@@ -13,12 +13,12 @@ Gruxi is actively being developed & tested, so we are rolling out improvements a
 - Serve static files with incredible speeds
 - Extremely low memory footprint and low CPU usage per request
 - Easy web interface for administration of everything built right in
-- Reverse Proxy, for SSL offloading/termination or just proxying requests from another web server
-- SSL/TLS support for securing sites (https://)
-- PHP Support (both PHP-FPM and managed php-cgi on Windows (needs to be v7.1+ of PHP for Windows))
+- Reverse Proxy - TLS offloading / proxying / load balancing / healthchecks
+- SSL/TLS support (secure https://)
+- PHP Support (both PHP-FPM and managed php-cgi on Windows)
 - Supports HTTP1.1 and HTTP2
-- High performance file cache, that keeps files in memory, ready to be served at insane speeds
-- Gzip content, to make it as small as possible (cached, if file caching is enabled)
+- High performance file memory cache, ready to be served at insane speeds
+- Gzip content (cached, if file caching is enabled)
 - Monitoring of current load and state directly from the admin portal
 
 ## Getting started

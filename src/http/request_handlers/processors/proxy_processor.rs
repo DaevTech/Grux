@@ -136,6 +136,8 @@ impl ProxyProcessor {
 }
 
 impl ProcessorTrait for ProxyProcessor {
+    fn initialize(&mut self) {}
+
     fn sanitize(&mut self) {
         // Clean up upstream server URLs
         self.upstream_servers = self.upstream_servers.iter().map(|url| url.trim().to_string()).filter(|url| !url.is_empty()).collect();

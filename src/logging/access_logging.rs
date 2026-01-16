@@ -1,10 +1,10 @@
+use crate::file::normalized_path::NormalizedPath;
 use crate::logging::syslog::{debug, error, trace};
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::select;
 
 use crate::core::running_state_manager::get_running_state_manager;
-use crate::file::file_util::get_full_file_path;
 use crate::logging::buffered_log::BufferedLog;
 
 // Key is site ID, value is buffered log entries
@@ -17,7 +17,7 @@ impl AccessLogBuffer {
         let mut access_log_buffer = AccessLogBuffer { buffered_logs: HashMap::new() };
 
         // Have a fallback log path in case it could not be resolved
-        let default_log_path = get_full_file_path(&"./logs".to_string()).unwrap();
+        let default_log_path = NormalizedPath::new("./logs", "").unwrap().get_full_path();
 
         // We get the config and add the logs we need
         let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
@@ -29,10 +29,10 @@ impl AccessLogBuffer {
             }
 
             let site_id = site.id.clone().to_string();
-            let log_file_path_result = get_full_file_path(&site.access_log_file);
+            let log_file_path_result = NormalizedPath::new(&site.access_log_file, "");
 
             let log_file_path = match log_file_path_result {
-                Ok(path) => path,
+                Ok(path) => path.get_full_path(),
                 Err(_) => {
                     error(format!("Invalid access log path for site {}: {}. Using default {}.", site_id, site.access_log_file, default_log_path));
                     let default_log_path_plus_site = format!("{}/{}.log", default_log_path, site_id);

@@ -2,7 +2,8 @@ use crate::configuration::binding_site_relation::BindingSiteRelationship;
 use crate::database::database_migration::migrate_database;
 use crate::database::database_schema::{CURRENT_DB_SCHEMA_VERSION, get_schema_version, set_schema_version};
 use crate::external_connections::managed_system::php_cgi;
-use crate::http::request_handlers::processors::php_processor;
+use crate::http::request_handlers::processor_trait::ProcessorTrait;
+use crate::http::request_handlers::processors::php_processor::{self, PHPProcessor};
 use crate::http::request_handlers::processors::proxy_processor::{ProxyProcessor, ProxyProcessorRewrite};
 use crate::http::request_handlers::processors::static_files_processor::StaticFileProcessor;
 use crate::logging::syslog::{info, trace};
@@ -61,7 +62,8 @@ fn add_admin_portal_to_configuration(configuration: &mut Configuration) {
     };
 
     // Static file processor for admin site
-    let request_static_processor = StaticFileProcessor::new("./www-admin".to_string(), vec!["index.html".to_string()]);
+    let mut request_static_processor = StaticFileProcessor::new("./www-admin".to_string(), vec!["index.html".to_string()]);
+    request_static_processor.initialize();
 
     // Request handler for admin site
     let request_handler = RequestHandler {
@@ -74,7 +76,6 @@ fn add_admin_portal_to_configuration(configuration: &mut Configuration) {
     };
 
     // Get the admin portal configuration
-
     let admin_site = Site {
         id: Uuid::new_v4().to_string(),
         hostnames: vec!["*".to_string()],
@@ -170,20 +171,22 @@ fn load_proxy_processors(connection: &Connection) -> Result<Vec<ProxyProcessor>,
         // Url rewrites is stored as JSON array
         let url_rewrites: Vec<ProxyProcessorRewrite> = serde_json::from_str(&url_rewrites_str).map_err(|e| format!("Failed to parse url_rewrites JSON: {}", e))?;
 
-        processors.push(ProxyProcessor {
-            id: processor_id,
-            proxy_type,
-            upstream_servers,
-            load_balancing_strategy,
-            timeout_seconds: timeout_seconds as u16,
-            health_check_path,
-            health_check_interval_seconds: health_check_interval_seconds as u32,
-            health_check_timeout_seconds: health_check_timeout_seconds as u32,
-            url_rewrites,
-            preserve_host_header: preserve_host_header_int != 0,
-            forced_host_header,
-            verify_tls_certificates: verify_tls_certificates_int != 0,
-        });
+        let mut new_processor = ProxyProcessor::new();
+        new_processor.id = processor_id;
+        new_processor.proxy_type = proxy_type;
+        new_processor.upstream_servers = upstream_servers;
+        new_processor.load_balancing_strategy = load_balancing_strategy;
+        new_processor.timeout_seconds = timeout_seconds as u16;
+        new_processor.health_check_path = health_check_path;
+        new_processor.health_check_interval_seconds = health_check_interval_seconds as u32;
+        new_processor.health_check_timeout_seconds = health_check_timeout_seconds as u32;
+        new_processor.url_rewrites = url_rewrites;
+        new_processor.preserve_host_header = preserve_host_header_int != 0;
+        new_processor.forced_host_header = forced_host_header;
+        new_processor.verify_tls_certificates = verify_tls_certificates_int != 0;
+
+        new_processor.initialize();
+        processors.push(new_processor);
     }
     Ok(processors)
 }
@@ -204,16 +207,19 @@ fn load_php_processors(connection: &Connection) -> Result<Vec<php_processor::PHP
         let fastcgi_web_root: String = statement.read(6).map_err(|e| format!("Failed to read fastcgi_web_root: {}", e))?;
         let server_software_spoof: String = statement.read(7).map_err(|e| format!("Failed to read server_software_spoof: {}", e))?;
 
-        processors.push(php_processor::PHPProcessor {
-            id: processor_id,
-            served_by_type,
-            php_cgi_handler_id,
-            fastcgi_ip_and_port,
-            request_timeout: request_timeout as u32,
-            local_web_root,
-            fastcgi_web_root,
-            server_software_spoof,
-        });
+        let mut new_processor = PHPProcessor::new();
+        new_processor.id = processor_id;
+        new_processor.served_by_type = served_by_type;
+        new_processor.php_cgi_handler_id = php_cgi_handler_id;
+        new_processor.fastcgi_ip_and_port = fastcgi_ip_and_port;
+        new_processor.request_timeout = request_timeout as u32;
+        new_processor.local_web_root = local_web_root;
+        new_processor.fastcgi_web_root = fastcgi_web_root;
+        new_processor.server_software_spoof = server_software_spoof;
+
+        new_processor.initialize();
+        processors.push(new_processor);
+
     }
 
     Ok(processors)
@@ -237,23 +243,6 @@ fn load_php_cgi_handlers(connection: &Connection) -> Result<Vec<php_cgi::PhpCgi>
 
     Ok(handlers)
 }
-
-/*
-TODO: Remove this function and its usage since we no longer store sites in bindings
-pub fn handle_relationship_binding_sites(relationships: &Vec<BindingSiteRelationship>, bindings: &mut Vec<Binding>, sites: &Vec<Site>) {
-    // For sites and binding, generate hashmaps for quick lookup
-    let mut binding_map = bindings.iter_mut().map(|b| (b.id.clone(), b)).collect::<HashMap<_, _>>();
-    let site_map = sites.iter().map(|s| (s.id.clone(), s)).collect::<HashMap<_, _>>();
-
-    for relationship in relationships {
-        if let Some(binding) = binding_map.get_mut(&relationship.binding_id) {
-            if let Some(site) = site_map.get(&relationship.site_id) {
-                binding.add_site((*site).clone());
-            }
-        }
-    }
-}
-*/
 
 fn load_core_config(connection: &Connection) -> Result<Core, String> {
     // Load server settings (single record with id=1)
@@ -303,7 +292,7 @@ fn load_core_config(connection: &Connection) -> Result<Core, String> {
 
             // Server settings
             "max_body_size" => {
-                core.server_settings.max_body_size = value.parse::<usize>().map_err(|e| format!("Failed to parse max_body_size: {}", e))?;
+                core.server_settings.max_body_size = value.parse::<u64>().map_err(|e| format!("Failed to parse max_body_size: {}", e))?;
             }
             "blocked_file_patterns" => {
                 core.server_settings.blocked_file_patterns = parse_comma_separated_list(&value, true);
@@ -464,11 +453,11 @@ fn load_static_file_processors(connection: &Connection) -> Result<Vec<StaticFile
 
         let web_root_index_file_list = parse_comma_separated_list(&web_root_index_file_list_str, false);
 
-        processors.push(StaticFileProcessor {
-            id: processor_id,
-            web_root,
-            web_root_index_file_list,
-        });
+        let mut new_processor = StaticFileProcessor::new(web_root, web_root_index_file_list);
+        new_processor.id = processor_id;
+        new_processor.initialize();
+
+        processors.push(new_processor);
     }
 
     Ok(processors)

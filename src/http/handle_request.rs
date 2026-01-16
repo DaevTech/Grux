@@ -44,8 +44,13 @@ pub async fn handle_request(mut gruxi_request: GruxiRequest, binding: Binding) -
     let hostname = gruxi_request.get_hostname();
     let site = find_best_match_site(&sites, &hostname);
     if let None = site {
-        trace(format!("No matching site found for hostname: '{}' on binding ID: '{}'", &hostname, &binding.id));
-        return Ok(GruxiResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
+        if hostname.is_empty() {
+            trace(format!("No hostname provided in request on binding ID: '{}'", &binding.id));
+            return Ok(GruxiResponse::new_empty_with_status(hyper::StatusCode::BAD_REQUEST.as_u16()));
+        } else {
+            trace(format!("No matching site found for hostname: '{}' on binding ID: '{}'", &hostname, &binding.id));
+            return Ok(GruxiResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
+        }
     }
     let site = site.unwrap();
     trace(format!("Matched site with request: {:?}", &site));
@@ -242,7 +247,7 @@ async fn validate_request(gruxi_request: &mut GruxiRequest) -> Result<(), GruxiE
         // Check Content-Length header if present
         if let Some(content_length_header) = gruxi_request.get_headers().get("Content-Length") {
             if let Ok(content_length_str) = content_length_header.to_str() {
-                if let Ok(content_length) = content_length_str.parse::<usize>() {
+                if let Ok(content_length) = content_length_str.parse::<u64>() {
                     if content_length > max_body_size {
                         return Err(GruxiError::new(
                             GruxiErrorKind::HttpRequestValidation(hyper::StatusCode::PAYLOAD_TOO_LARGE.as_u16()),
