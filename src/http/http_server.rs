@@ -1,10 +1,11 @@
 use crate::configuration::binding::Binding;
 use crate::http::handle_request::handle_request;
-use crate::http::http_tls::build_tls_acceptor;
+use crate::http::http_tls::build_unified_tls_acceptor;
 use crate::http::http_util::add_standard_headers_to_response;
 use crate::http::request_response::gruxi_request::GruxiRequest;
 use crate::http::request_response::gruxi_response::GruxiResponse;
 use crate::logging::syslog::{debug, error, info, trace, warn};
+use tokio_stream::StreamExt;
 use hyper::Request;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -83,14 +84,34 @@ async fn start_server_binding(binding: Binding) {
     let stop_services_token = triggers.get_trigger("stop_services").expect("Failed to get stop_services trigger").read().await.clone();
 
     if binding.is_tls {
-        let acceptor = match build_tls_acceptor(&binding).await {
-            Ok(a) => a,
+        // Build unified TLS acceptor that handles both ACME and manual certificates
+        let (tls_acceptor, acme_state_opt) = match build_unified_tls_acceptor(&binding).await {
+            Ok(result) => result,
             Err(e) => {
                 error(format!("TLS setup failed for {}:{} => {}", binding.ip, binding.port, e));
                 return;
             }
         };
 
+        // If we have ACME state, spawn a task to poll it for certificate updates
+        if let Some(mut acme_state) = acme_state_opt {
+            let binding_info = format!("{}:{}", binding.ip, binding.port);
+            tokio::spawn(async move {
+                // Poll the ACME state to handle certificate acquisition and renewal
+                while let Some(event) = acme_state.next().await {
+                    match event {
+                        Ok(ok) => {
+                            trace(format!("ACME event for {}: {:?}", binding_info, ok));
+                        }
+                        Err(err) => {
+                            debug(format!("ACME error for {}: {:?}", binding_info, err));
+                        }
+                    }
+                }
+            });
+        }
+
+        // Unified TLS accept loop
         loop {
             select! {
                 _ = shutdown_token.cancelled() => {
@@ -108,7 +129,7 @@ async fn start_server_binding(binding: Binding) {
                                 .map(|addr| addr.ip().to_string())
                                 .unwrap_or_else(|_| "<unknown>".to_string());
 
-                            let acceptor = acceptor.clone();
+                            let acceptor = tls_acceptor.clone();
                             let binding = binding.clone();
                             let shutdown_token = shutdown_token.clone();
                             let stop_services_token = stop_services_token.clone();

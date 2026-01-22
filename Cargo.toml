@@ -26,6 +26,7 @@ num_cpus = "1.17.0"
 rustls-pemfile = "2.2.0"
 random_password_generator = "0.1.0"
 tokio-util = "0.7.17"
+tokio-stream = { version = "0.1.17", features = ["net"] }
 rustls-pki-types = "1.13.1"
 http = "1.4.0"
 hyper-rustls = { version = "0.27.7", features = ["http1", "http2", "native-tokio", "tls12", "logging"] }
@@ -40,6 +41,7 @@ email_address = "0.2.9"
 psl = "2.1.180"
 instant-acme = "0.8.4"
 x509-parser = "0.18.0"
+rustls-acme = { version = "0.15.1", features = ["tokio", "aws-lc-rs", "webpki-roots"] }
 
 [lib]
 name = "gruxi"
