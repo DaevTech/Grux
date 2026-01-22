@@ -9,3 +9,4 @@ www-admin-src/.yarn
 www-admin-src/.yarnrc.yml
 development/php-fpm/data/
 development/wordpress/data/
+certs/cache/

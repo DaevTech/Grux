@@ -33,6 +33,11 @@ pub fn migrate_database() -> i32 {
         migrate_db_4_to_5(&connection);
         schema_version = 5;
     }
+     // Migration from 5 to 6
+    if schema_version == 5 {
+        migrate_db_5_to_6(&connection);
+        schema_version = 6;
+    }
 
     schema_version
 }
@@ -71,4 +76,14 @@ fn migrate_db_4_to_5(connection: &Connection) {
     }
 
     set_schema_version(5).expect("Failed to set schema version to 5 after migration");
+}
+
+ fn migrate_db_5_to_6(connection: &Connection) {
+    // Add "tls_automatic_challenge_type" to "sites" table
+    let alter_table_result = connection.execute("ALTER TABLE sites ADD COLUMN tls_automatic_challenge_type TEXT NOT NULL DEFAULT '';");
+    if let Err(e) = alter_table_result {
+        panic!("Failed to migrate database from version 5 to 6: {}", e);
+    }
+
+    set_schema_version(6).expect("Failed to set schema version to 6 after migration");
 }

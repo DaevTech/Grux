@@ -10,6 +10,7 @@ use crate::http::request_response::gruxi_request::GruxiRequest;
 use crate::http::request_response::gruxi_response::GruxiResponse;
 use crate::http::site_match::site_matcher::find_best_match_site;
 use crate::logging::syslog::{debug, trace};
+use crate::tls::tls_http01_challenge::get_tls_http01_challenge_store;
 use chrono::Local;
 use hyper::header::HeaderValue;
 
@@ -64,6 +65,26 @@ pub async fn handle_request(mut gruxi_request: GruxiRequest, binding: Binding) -
         };
         let response = GruxiResponse::new_empty_with_status(status_code);
         return Ok(response);
+    }
+
+     // Check for ACME HTTP-01 challenge requests
+    if binding.port == 80 && site.tls_automatic_enabled{
+        let path = gruxi_request.get_path();
+        let challenge_store = get_tls_http01_challenge_store();
+        match challenge_store.try_handle_challenge(&path) {
+            None => {
+                trace(format!("ACME HTTP-01 challenge not found for path: {}", path));
+                return Ok(GruxiResponse::new_empty_with_status(hyper::StatusCode::NOT_FOUND.as_u16()));
+            }
+            Some(key_authorization) => {
+                // Return the key authorization immediately
+                trace(format!("ACME HTTP-01 challenge response for path: {}", path));
+                let mut response = GruxiResponse::new_with_bytes(200, key_authorization);
+                response.headers_mut().insert("Content-Type", HeaderValue::from_static("text/plain"));
+                add_standard_headers_to_response(&mut response);
+                return Ok(response);
+            }
+        }
     }
 
     // Handle special case for OPTIONS * request, which is stupid but valid

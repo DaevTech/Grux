@@ -1,10 +1,12 @@
 use instant_acme::{Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus};
+use std::time::Duration;
 use tokio::select;
 
 use crate::{
     configuration::{binding::Binding, binding_site_relation::BindingSiteRelationship, load_configuration::fetch_configuration_in_db, site::Site},
     file::normalized_path::NormalizedPath,
-    logging::syslog::{error, trace},
+    logging::syslog::{error, trace, warn},
+    tls::tls_http01_challenge::get_tls_http01_challenge_store,
 };
 
 pub struct TlsCertManager {}
@@ -181,6 +183,7 @@ impl TlsCertManager {
                     }
                     let configuration = configuration_result.unwrap();
 
+                    // Get the sites that need certificate updates (with HTTP-01 challenge - Alpn supported via rustls-acme on the binding)
                     let sites_to_update = Self::get_sites_needing_certificate_update(&configuration.sites, &configuration.bindings, &configuration.binding_sites).await;
                     let site_to_update_count = sites_to_update.len();
                     for site in sites_to_update {
@@ -190,6 +193,11 @@ impl TlsCertManager {
                     if site_to_update_count == 0 {
                         trace("No TLS certificate updates needed at this time.".to_string());
                     }
+
+                    // Clean up expired challenges
+                    let challenge_store = get_tls_http01_challenge_store();
+                    challenge_store.cleanup_expired();
+
                     wait_until_next_run = std::time::Duration::from_secs(10);
                 },
                 _ = shutdown_token.cancelled() => {
@@ -218,68 +226,265 @@ impl TlsCertManager {
             return;
         }
         let mut order = order_result.unwrap();
-        let state = order.state();
 
-        // Handle authorizations, which is the challenge/response process for each domain
+        // Get the challenge store for HTTP-01 challenges
+        let challenge_store = get_tls_http01_challenge_store();
+
+        // Track tokens we've added so we can clean them up later
+        let mut added_tokens: Vec<String> = Vec::new();
+
+        // Handle authorizations - this is the challenge/response process for each domain
+        // The authorizations() method returns a stream-like object
         let mut authorizations = order.authorizations();
 
-        // TODO: Implement challenge handling here
-/*
-        while let Some(result) = authorizations.next().await {
-            let mut authz = result?;
+        loop {
+            // Get the next authorization
+            let authz_result = authorizations.next().await;
+            let mut authz = match authz_result {
+                Some(Ok(a)) => a,
+                Some(Err(e)) => {
+                    error(format!("Failed to get authorization for ACME order for site '{}': {}", site.id, e));
+                    // Clean up any tokens we've added
+                    for token in &added_tokens {
+                        challenge_store.remove_challenge(token);
+                    }
+                    return;
+                }
+                None => break, // No more authorizations
+            };
+
             match authz.status {
-                AuthorizationStatus::Pending => {}
-                AuthorizationStatus::Valid => continue,
-                _ => todo!(),
+                AuthorizationStatus::Pending => {
+                    // We need to complete the challenge
+                }
+                AuthorizationStatus::Valid => {
+                    // Already valid, skip
+                    trace(format!("Authorization already valid for domain in site '{}'", site.id));
+                    continue;
+                }
+                _ => {
+                    error(format!("Authorization for ACME order for site '{}' is in unexpected status: {:?}", site.id, authz.status));
+                    // Clean up any tokens we've added
+                    for token in &added_tokens {
+                        challenge_store.remove_challenge(token);
+                    }
+                    return;
+                }
             }
 
-            let mut challenge_option = authz.challenge(ChallengeType::Http01);
-
-
-            challenge.set_ready().await?;
-        }
-       for authz_result in authorizations.collect::<Vec<_>>().await {
-            let mut authz = match authz_result {
-                Ok(a) => a,
-                Err(e) => {
-                    error(format!("Failed to retrieve authorization for ACME order for site '{}': {}", site.id, e));
+            // Get the HTTP-01 challenge handle
+            let mut challenge_handle = match authz.challenge(ChallengeType::Http01) {
+                Some(ch) => ch,
+                None => {
+                    error(format!("No HTTP-01 challenge found for authorization in ACME order for site '{}'", site.id));
+                    // Clean up any tokens we've added
+                    for token in &added_tokens {
+                        challenge_store.remove_challenge(token);
+                    }
                     return;
                 }
             };
-            match authz.status {
-                AuthorizationStatus::Pending => {}
-                AuthorizationStatus::Valid => continue,
-                _ => {
-                    error(format!("Authorization for ACME order for site '{}' is in unexpected status: {:?}", site.id, authz.status));
-                    return;
-                }
-            }
 
-            let mut challenge_option = authz.challenge(ChallengeType::Http01);
-            if challenge_option.is_none() {
-                error(format!("No HTTP-01 challenge found for authorization in ACME order for site '{}'", site.id));
-                return;
-            }
-            let mut challenge = challenge_option.unwrap();
+            // Get the key authorization for this challenge
+            let key_auth = challenge_handle.key_authorization();
+            let token = challenge_handle.token.clone();
+            let key_auth_string = key_auth.as_str().to_string();
 
-            // Here we would normally set up the HTTP-01 challenge response on our server
-            // For this example, we assume it's done externally
+            trace(format!(
+                "Setting up HTTP-01 challenge for site '{}': token={}, path=/.well-known/acme-challenge/{}",
+                site.id, token, token
+            ));
 
-            let challenge_set_result = challenge.set_ready().await;
-            if let Err(e) = challenge_set_result {
+            // Add the challenge to our store so the HTTP handler can respond to it
+            challenge_store.add_challenge(token.clone(), key_auth_string);
+            added_tokens.push(token.clone());
+
+            // Tell the ACME server we're ready for validation
+            let set_ready_result = challenge_handle.set_ready().await;
+            if let Err(e) = set_ready_result {
                 error(format!("Failed to set HTTP-01 challenge ready for site '{}': {}", site.id, e));
-                return;
-            }
-
-            // Wait for authorization to be valid
-            let authz_status_result = authz.wait_valid(Duration::from_secs(30)).await;
-            if let Err(e) = authz_status_result {
-                error(format!("Authorization did not become valid for site '{}': {}", site.id, e));
+                // Clean up tokens
+                for token in &added_tokens {
+                    challenge_store.remove_challenge(token);
+                }
                 return;
             }
         }
-         */
-        trace(format!("Updating TLS certificate for site ID: {}", site.id));
+
+        // Wait for the order to become ready (all authorizations validated)
+        // Poll with exponential backoff, max 5 minutes total
+        let mut delay = Duration::from_secs(1);
+        let max_wait = Duration::from_secs(300);
+        let start = std::time::Instant::now();
+
+        loop {
+            if start.elapsed() > max_wait {
+                error(format!("Timed out waiting for ACME order to become ready for site '{}'", site.id));
+                // Clean up tokens
+                for token in &added_tokens {
+                    challenge_store.remove_challenge(token);
+                }
+                return;
+            }
+
+            tokio::time::sleep(delay).await;
+
+            // Refresh the order state
+            let refresh_result = order.refresh().await;
+            if let Err(e) = refresh_result {
+                warn(format!("Failed to refresh ACME order state for site '{}': {} - will retry", site.id, e));
+                delay = std::cmp::min(delay * 2, Duration::from_secs(30));
+                continue;
+            }
+
+            match order.state().status {
+                OrderStatus::Ready => {
+                    trace(format!("ACME order ready for site '{}', proceeding to finalize", site.id));
+                    break;
+                }
+                OrderStatus::Pending => {
+                    // Still waiting for validation
+                    delay = std::cmp::min(delay * 2, Duration::from_secs(10));
+                    continue;
+                }
+                OrderStatus::Invalid => {
+                    error(format!("ACME order became invalid for site '{}' - challenge may have failed", site.id));
+                    // Clean up tokens
+                    for token in &added_tokens {
+                        challenge_store.remove_challenge(token);
+                    }
+                    return;
+                }
+                OrderStatus::Valid => {
+                    // Already finalized (shouldn't happen here but handle it)
+                    trace(format!("ACME order already valid for site '{}'", site.id));
+                    break;
+                }
+                OrderStatus::Processing => {
+                    // Certificate is being issued
+                    delay = std::cmp::min(delay * 2, Duration::from_secs(10));
+                    continue;
+                }
+            }
+        }
+
+        // Clean up challenge tokens - they're no longer needed
+        for token in &added_tokens {
+            challenge_store.remove_challenge(token);
+        }
+
+        // Generate a CSR and finalize the order
+        let finalize_result = Self::finalize_order_and_get_certificate(&mut order, site).await;
+        if let Err(e) = finalize_result {
+            error(format!("Failed to finalize ACME order for site '{}': {}", site.id, e));
+            return;
+        }
+
+        trace(format!("Successfully updated TLS certificate for site ID: {}", site.id));
+    }
+
+    /// Generate CSR, finalize the order, and save the certificate
+    async fn finalize_order_and_get_certificate(order: &mut instant_acme::Order, site: &Site) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Use instant-acme's built-in finalize() which generates CSR and returns the private key PEM
+        let private_key_pem = order.finalize().await?;
+
+        // Wait for the certificate to be ready
+        let mut delay = Duration::from_secs(1);
+        let max_wait = Duration::from_secs(60);
+        let start = std::time::Instant::now();
+
+        let cert_chain_pem = loop {
+            if start.elapsed() > max_wait {
+                return Err("Timed out waiting for certificate".into());
+            }
+
+            // Refresh and check status
+            order.refresh().await?;
+
+            match order.state().status {
+                OrderStatus::Valid => {
+                    // Certificate is ready
+                    match order.certificate().await? {
+                        Some(cert) => break cert,
+                        None => {
+                            return Err("Order valid but no certificate returned".into());
+                        }
+                    }
+                }
+                OrderStatus::Processing => {
+                    // Still processing
+                    tokio::time::sleep(delay).await;
+                    delay = std::cmp::min(delay * 2, Duration::from_secs(10));
+                    continue;
+                }
+                status => {
+                    return Err(format!("Unexpected order status while waiting for certificate: {:?}", status).into());
+                }
+            }
+        };
+
+        // Save the certificate and key
+        Self::save_certificate_for_site(site, &cert_chain_pem, &private_key_pem).await?;
+
+        Ok(())
+    }
+
+    /// Save the certificate and key to disk and update the site configuration
+    async fn save_certificate_for_site(site: &Site, cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use tokio::fs;
+        use tokio::io::AsyncWriteExt;
+
+        let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
+        let config = cached_configuration.get_configuration().await;
+
+        // Determine the certificate cache directory
+        let cache_dir = if config.core.tls_settings.certificate_cache_path.trim().is_empty() {
+            "certs/cache".to_string()
+        } else {
+            config.core.tls_settings.certificate_cache_path.trim().to_string()
+        };
+
+        // Ensure directory exists
+        fs::create_dir_all(&cache_dir).await?;
+
+        // Generate file paths using site ID for uniqueness
+        let cert_path = format!("{}/{}_cert.pem", cache_dir, site.id);
+        let key_path = format!("{}/{}_key.pem", cache_dir, site.id);
+
+        // Write certificate (atomic write via temp file)
+        let cert_tmp = format!("{}.tmp", &cert_path);
+        {
+            let mut f = fs::File::create(&cert_tmp).await?;
+            f.write_all(cert_pem.as_bytes()).await?;
+            f.flush().await?;
+        }
+        fs::rename(&cert_tmp, &cert_path).await?;
+
+        // Write private key (atomic write via temp file)
+        let key_tmp = format!("{}.tmp", &key_path);
+        {
+            let mut f = fs::File::create(&key_tmp).await?;
+            f.write_all(key_pem.as_bytes()).await?;
+            f.flush().await?;
+        }
+        fs::rename(&key_tmp, &key_path).await?;
+
+        // Update the site configuration in the database
+        let connection = crate::core::database_connection::get_database_connection()?;
+        let current_time = chrono::Utc::now().timestamp() as u64;
+
+        let sql_update = format!(
+            "UPDATE sites SET tls_cert_path = '{}', tls_key_path = '{}', tls_automatic_last_update_success = {} WHERE id = '{}';",
+            cert_path, key_path, current_time, site.id
+        );
+        connection.execute(sql_update.as_str())?;
+
+        trace(format!(
+            "Saved ACME certificate for site '{}' to {} and {}",
+            site.id, cert_path, key_path
+        ));
+
+        Ok(())
     }
 
     /// Get a list of sites that needs certificate update

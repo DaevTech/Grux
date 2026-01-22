@@ -1414,7 +1414,6 @@ onMounted(() => {
                                 </div>
 
                                 <div v-if="isSiteSubsectionExpanded(siteIndex, 'tls')">
-
                                     <div class="form-grid compact">
                                         <div class="form-field checkbox-grid compact">
                                             <label>
@@ -1423,17 +1422,20 @@ onMounted(() => {
                                                 <span class="help-icon" data-tooltip="If enabled, Gruxi will attempt to automatically obtain and renew TLS certificates for this site. Requires Core Settings → TLS Settings (account email), and hostnames must be publicly reachable.">?</span>
                                             </label>
                                         </div>
+                                        <div class="form-field compact" v-if="site.tls_automatic_enabled">
+                                            <label>Challenge Type (default: TLS-ALPN-01) <span class="help-icon" data-tooltip="TLS-ALPN-01 requires port 443 to be open, HTTP-01 requires port 80 to be open. Keep the default TLS-ALPN-01 unless you have specific needs.">?</span></label>
+                                            <select v-model="site.tls_automatic_challenge_type" class="width-auto-fit" >
+                                                <option value="alpn">TLS-ALPN-01</option>
+                                                <option value="http">HTTP-01</option>
+                                            </select>
+                                        </div>
                                     </div>
 
                                     <div class="info-field" v-if="!site.tls_automatic_enabled">
                                         <p><strong>Note:</strong> You can either specify file paths or paste the certificate/key content directly. If both are provided, the file paths take precedence.</p>
                                     </div>
 
-                                    <div class="info-field" v-if="site.tls_automatic_enabled">
-                                        <p><strong>Note:</strong> Certificates will be automatically obtained and renewed by Gruxi and therefore should not be edited manually.</p>
-                                    </div>
-
-                                    <div class="tls-grid-full">
+                                    <div class="tls-grid-full" v-if="!site.tls_automatic_enabled">
                                         <div class="tls-paths-row">
                                             <div class="form-field">
                                                 <label
@@ -1450,7 +1452,7 @@ onMounted(() => {
                                                 <input v-model="site.tls_key_path" type="text" placeholder="Path to private key file" :disabled="site.tls_automatic_enabled" />
                                             </div>
                                         </div>
-                                        <div class="tls-content-row" v-if="!site.tls_automatic_enabled">
+                                        <div class="tls-content-row">
                                             <div class="form-field">
                                                 <label>Certificate Content (PEM format)</label>
                                                 <textarea v-model="site.tls_cert_content" placeholder="Paste your certificate content here in PEM format (-----BEGIN CERTIFICATE-----...)" rows="6" class="tls-content-textarea"></textarea>
@@ -1842,6 +1844,10 @@ onMounted(() => {
 
 .max500 {
     max-width: 500px;
+}
+
+.width-auto-fit {
+    width:fit-content;
 }
 
 .binding-summary,
@@ -2532,7 +2538,6 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-
 }
 
 .form-field.small-field {

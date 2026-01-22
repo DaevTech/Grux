@@ -2,7 +2,7 @@ use sqlite::State;
 
 use crate::core::database_connection::get_database_connection;
 
-pub const CURRENT_DB_SCHEMA_VERSION: i32 = 5;
+pub const CURRENT_DB_SCHEMA_VERSION: i32 = 6;
 
 pub struct DatabaseSchema {
     pub version: i32,
@@ -109,7 +109,8 @@ fn get_init_sql() -> Vec<String> {
         extra_headers TEXT NOT NULL DEFAULT '',
         tls_automatic_enabled BOOLEAN NOT NULL DEFAULT 0,
         tls_automatic_last_update INTEGER NOT NULL DEFAULT 0,
-        tls_automatic_last_update_success INTEGER NOT NULL DEFAULT 0
+        tls_automatic_last_update_success INTEGER NOT NULL DEFAULT 0,
+        tls_automatic_challenge_type TEXT NOT NULL DEFAULT ''
     );"
         .to_string(),
         // Junction table for many-to-many relationship between bindings and sites

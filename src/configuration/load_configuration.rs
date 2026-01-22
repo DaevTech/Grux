@@ -85,6 +85,7 @@ fn add_admin_portal_to_configuration(configuration: &mut Configuration) {
         is_default: true,
         is_enabled: true,
         tls_automatic_enabled: false,
+        tls_automatic_challenge_type: "alpn".to_string(),
         tls_automatic_last_update: 0,
         tls_automatic_last_update_success: 0,
         tls_cert_path: configuration.core.admin_portal.get_tls_certificate_path(),
@@ -395,12 +396,20 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
         // TLS Automatic Last Update Success (added in schema version 5)
         let tls_automatic_last_update_success: i64 = statement.read(15).map_err(|e| format!("Failed to read tls_automatic_last_update_success: {}", e))?;
 
+        // TLS Challenge Type (added in schema version 6)
+        let mut tls_automatic_challenge_type: String = statement.read(16).map_err(|e| format!("Failed to read tls_automatic_challenge_type: {}", e))?;
+        if tls_automatic_challenge_type.is_empty() {
+            // Default to "alpn" if empty for backward compatibility
+            tls_automatic_challenge_type = "alpn".to_string();
+        }
+
         sites.push(Site {
             id: site_id,
             hostnames,
             is_default: is_default != 0,
             is_enabled: is_enabled != 0,
             tls_automatic_enabled: tls_automatic_enabled != 0,
+            tls_automatic_challenge_type,
             tls_automatic_last_update: tls_automatic_last_update as u64,
             tls_automatic_last_update_success: tls_automatic_last_update_success as u64,
             tls_cert_path,
@@ -411,13 +420,13 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
             rewrite_functions,
             access_log_enabled: access_log_enabled != 0,
             access_log_file,
-            extra_headers,
-        });
+            extra_headers
+    });
     }
 
     Ok(sites)
-}
 
+}
 fn load_binding_sites_relationships(connection: &Connection) -> Result<Vec<BindingSiteRelationship>, String> {
     let mut statement = connection
         .prepare("SELECT DISTINCT binding_id, site_id FROM binding_sites")

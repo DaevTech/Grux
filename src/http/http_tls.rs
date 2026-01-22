@@ -79,7 +79,7 @@ pub async fn build_acme_state_for_binding(
     }
 
     let cache_dir = if tls_settings.certificate_cache_path.trim().is_empty() {
-        "certs/rustls-acme-cache".to_string()
+        "certs/cache".to_string()
     } else {
         tls_settings.certificate_cache_path.trim().to_string()
     };

@@ -16,8 +16,9 @@ pub struct Site {
     pub is_enabled: bool,
     // Automatic TLS
     pub tls_automatic_enabled: bool,
-    pub tls_automatic_last_update: u64, // Timestamp of last automatic TLS update attempt
+    pub tls_automatic_last_update: u64,         // Timestamp of last automatic TLS update attempt
     pub tls_automatic_last_update_success: u64, // Timestamp of last successful automatic TLS update
+    pub tls_automatic_challenge_type: String,             // "http" or "alpn" - Default is "alpn"
     // TLS certificate path or actual content
     pub tls_cert_path: String,
     pub tls_cert_content: String,
@@ -48,6 +49,7 @@ impl Site {
             tls_automatic_enabled: false,
             tls_automatic_last_update: 0,
             tls_automatic_last_update_success: 0,
+            tls_automatic_challenge_type: "alpn".to_string(),
             tls_cert_path: String::new(),
             tls_cert_content: String::new(),
             tls_key_path: String::new(),
@@ -70,6 +72,9 @@ impl Site {
         for func in &mut self.rewrite_functions {
             *func = func.trim().to_string();
         }
+
+        // Trim tls strings
+        self.tls_automatic_challenge_type = self.tls_automatic_challenge_type.trim().to_string();
 
         // Trim whitespace from access log file
         self.access_log_file = self.access_log_file.trim().to_string();
@@ -155,6 +160,16 @@ impl Site {
                 if let Err(err_msg) = Site::verify_hostname(hostname_trimmed) {
                     errors.push(err_msg);
                 }
+            }
+        }
+
+        // Validate tls_automatic_challenge_type
+        let valid_challenge_types = vec!["http", "alpn"];
+        if self.tls_automatic_challenge_type.is_empty() {
+            errors.push("Challenge type cannot be empty. Valid options are: http, alpn".to_string());
+        } else {
+            if !valid_challenge_types.contains(&self.tls_automatic_challenge_type.as_str()) {
+                errors.push(format!("Invalid challenge type: '{}'. Valid options are: {:?}", &self.tls_automatic_challenge_type, valid_challenge_types));
             }
         }
 
