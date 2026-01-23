@@ -51,12 +51,11 @@ impl MonitoringState {
 
             // Calculate requests per second
             let current_requests = monitoring_state.get_requests_served();
-            let last_requests = monitoring_state.requests_served_last.load(Ordering::SeqCst);
+            let last_requests = monitoring_state.requests_served_last.load(Ordering::Relaxed);
             let requests_diff = current_requests.saturating_sub(last_requests);
             let requests_per_sec: f64 = requests_diff as f64 / update_interval_seconds as f64;
-            monitoring_state.requests_served_per_sec.store(requests_per_sec.to_bits() as usize, Ordering::SeqCst);
-            monitoring_state.requests_served_last.store(current_requests, Ordering::SeqCst);
-
+            monitoring_state.requests_served_per_sec.store(requests_per_sec.to_bits() as usize, Ordering::Relaxed);
+            monitoring_state.requests_served_last.store(current_requests, Ordering::Relaxed);
             // Fetch some data from file cache
             {
                 let running_state_manager = get_running_state_manager().await;
@@ -64,7 +63,7 @@ impl MonitoringState {
                 let unlocked_running_state = running_state.read().await;
                 let file_reader_cache = unlocked_running_state.get_file_reader_cache();
 
-                monitoring_state.file_cache_current_items.store(file_reader_cache.get_current_item_count() as usize, Ordering::SeqCst);
+                monitoring_state.file_cache_current_items.store(file_reader_cache.get_current_item_count() as usize, Ordering::Relaxed);
 
                 // Clone the configuration values we need, then drop the guard
                 let (file_cache_enabled, file_cache_max_items) = {
@@ -72,8 +71,8 @@ impl MonitoringState {
                     let configuration = cached_configuration.get_configuration().await;
                     (configuration.core.file_cache.is_enabled, configuration.core.file_cache.cache_item_size)
                 };
-                monitoring_state.file_cache_enabled.store(file_cache_enabled, Ordering::SeqCst);
-                monitoring_state.file_cache_max_items.store(file_cache_max_items, Ordering::SeqCst);
+                monitoring_state.file_cache_enabled.store(file_cache_enabled, Ordering::Relaxed);
+                monitoring_state.file_cache_max_items.store(file_cache_max_items, Ordering::Relaxed);
             }
 
             trace("Monitoring data updated");
@@ -90,23 +89,23 @@ impl MonitoringState {
     }
 
     pub fn increment_requests_served(&self) {
-        self.requests_served.fetch_add(1, Ordering::SeqCst);
-        self.requests_in_progress.fetch_add(1, Ordering::SeqCst);
+        self.requests_served.fetch_add(1, Ordering::Relaxed);
+        self.requests_in_progress.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn decrement_requests_in_progress(&self) {
-        self.requests_in_progress.fetch_sub(1, Ordering::SeqCst);
+        self.requests_in_progress.fetch_sub(1, Ordering::Relaxed);
     }
 
     pub fn get_requests_served(&self) -> usize {
-        self.requests_served.load(Ordering::SeqCst)
+        self.requests_served.load(Ordering::Relaxed)
     }
 
     pub async fn get_json(&self) -> serde_json::Value {
         let monitoring_state = get_monitoring_state().await;
 
         // Get the requests in progress minus one to account for the current monitoring request
-        let requests_in_progress = monitoring_state.requests_in_progress.load(Ordering::SeqCst) - 1;
+        let requests_in_progress = monitoring_state.requests_in_progress.load(Ordering::Relaxed) - 1;
 
         serde_json::json!({
             "requests_served": monitoring_state.get_requests_served(),
@@ -114,9 +113,9 @@ impl MonitoringState {
             "requests_in_progress": requests_in_progress,
             "uptime_seconds": monitoring_state.server_start_time.elapsed().as_secs(),
             "file_cache": {
-                "enabled": monitoring_state.file_cache_enabled.load(Ordering::SeqCst),
-                "current_items": monitoring_state.file_cache_current_items.load(Ordering::SeqCst),
-                "max_items": monitoring_state.file_cache_max_items.load(Ordering::SeqCst),
+                "enabled": monitoring_state.file_cache_enabled.load(Ordering::Relaxed),
+                "current_items": monitoring_state.file_cache_current_items.load(Ordering::Relaxed),
+                "max_items": monitoring_state.file_cache_max_items.load(Ordering::Relaxed),
             }
         })
     }
