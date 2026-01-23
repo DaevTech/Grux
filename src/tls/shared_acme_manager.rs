@@ -14,7 +14,7 @@
 
 use crate::core::running_state_manager::get_running_state_manager;
 use crate::core::triggers::get_trigger_handler;
-use crate::logging::syslog::{debug, info, trace};
+use crate::logging::syslog::{debug, trace};
 use rustls_acme::caches::DirCache;
 use rustls_acme::{AcmeConfig, ResolvesServerCertAcme};
 use std::collections::BTreeSet;
@@ -60,7 +60,7 @@ impl SharedAcmeManager {
 pub async fn shutdown_shared_acme_manager() {
     let mut manager = SHARED_ACME_MANAGER.write().await;
     if let Some(existing) = manager.take() {
-        info("Shutting down shared ACME manager".to_string());
+        debug("Shutting down shared ACME manager".to_string());
         existing.polling_cancel_token.cancel();
     }
 }
@@ -174,7 +174,7 @@ async fn create_shared_acme_manager() -> Result<Option<SharedAcmeManager>, Box<d
     // rustls-acme requires `mailto:` prefix.
     acme_config = acme_config.contact_push(format!("mailto:{}", tls_settings.account_email.trim()));
 
-    info(format!(
+    trace(format!(
         "ACME initialized (staging={}, cache_dir='{}') for {} domains: {:?}",
         tls_settings.use_staging_server,
         cache_dir,
@@ -208,7 +208,7 @@ fn spawn_acme_polling_task(
     cancel_token: CancellationToken,
 ) {
     tokio::spawn(async move {
-        info("ACME background polling task started".to_string());
+        trace("ACME background polling task started".to_string());
 
         // Get shutdown and stop_services triggers
         let triggers = get_trigger_handler();
@@ -265,6 +265,6 @@ fn spawn_acme_polling_task(
             }
         }
 
-        info("ACME background polling task ended".to_string());
+        debug("ACME background polling task ended".to_string());
     });
 }

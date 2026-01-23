@@ -285,8 +285,24 @@ impl FileEntry {
         let accept_encoding_headers = gruxi_request.get_accepted_encodings();
 
         if self.content.raw.is_none() && self.content.gzip.is_none() {
-            trace("No cached file data content is present, so we return a stream from the filesystem instead".to_string());
+            trace("No cached file data content is present, so we return from the filesystem instead (full if small and stream if big)".to_string());
 
+            // For smaller files (<= 64 KB), return full content, otherwise stream
+            if self.meta.length <= 64 * 1024 {
+                // Small file, return full
+                let file_bytes = match tokio::fs::read(&self.meta.file_path).await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        trace(format!("Failed to read file {} for full content: {}", self.meta.file_path, e));
+                        let empty = Full::new(Bytes::new()).map_err(|never| -> BodyError { match never {} });
+                        return (BoxBody::new(empty), String::new());
+                    }
+                };
+                let full_body = Full::new(Bytes::from(file_bytes)).map_err(|never| -> BodyError { match never {} });
+                return (BoxBody::new(full_body), String::new());
+            }
+
+            // Otherwise we stream, to maintain low memory usage by not loading the full file into memory
             let file = match File::open(&self.meta.file_path).await {
                 Ok(f) => f,
                 Err(e) => {

@@ -108,9 +108,8 @@ impl ProcessorTrait for StaticFileProcessor {
 
         // Get the file, if it exists
         let normalized_path_result = NormalizedPath::new(&web_root, &path);
-
         if let Err(_) = normalized_path_result {
-            error(format!("Failed to normalize request path: {}", path));
+            trace(format!("Failed or rejected to normalize request path: {}", path));
             return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
         }
         let normalized_path = normalized_path_result.unwrap();
@@ -118,7 +117,7 @@ impl ProcessorTrait for StaticFileProcessor {
         let file_data_result = resolve_web_root_and_path_and_get_file(&normalized_path).await;
         if let Err(e) = file_data_result {
             // If we fail to get the file, return cant/wont handle
-            error(format!("We could not get data on the file: {}, so we cannot handle with static file processor", e));
+            trace(format!("We could not get data on the file: {}, so we cannot handle with static file processor", e));
             return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::PathError(e))));
         }
         let mut file_data = file_data_result.unwrap();
@@ -135,7 +134,7 @@ impl ProcessorTrait for StaticFileProcessor {
                 // Get the cached file, if it exists
                 let normalized_path_result = NormalizedPath::new(&web_root, &path);
                 if let Err(_) = normalized_path_result {
-                    error(format!("Failed to normalize request path: {}", path));
+                    trace(format!("Failed or rejected to normalize request path: {}", path));
                     return Err(GruxiError::new_with_kind_only(GruxiErrorKind::StaticFileProcessor(StaticFileProcessorError::FileNotFound)));
                 }
                 let normalized_path = normalized_path_result.unwrap();
