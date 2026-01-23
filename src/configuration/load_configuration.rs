@@ -79,15 +79,24 @@ fn add_admin_portal_to_configuration(configuration: &mut Configuration) {
     };
 
     // Get the admin portal configuration
+    // If automatic TLS is enabled and a domain is configured, use that domain
+    // Otherwise use wildcard to match any hostname
+    let admin_hostnames = if configuration.core.admin_portal.tls_automatic_enabled {
+        if let Some(domain) = &configuration.core.admin_portal.domain_name {
+            if !domain.is_empty() { vec![domain.clone()] } else { vec!["*".to_string()] }
+        } else {
+            vec!["*".to_string()]
+        }
+    } else {
+        vec!["*".to_string()]
+    };
+
     let admin_site = Site {
         id: Uuid::new_v4().to_string(),
-        hostnames: vec!["*".to_string()],
+        hostnames: admin_hostnames,
         is_default: true,
         is_enabled: true,
-        tls_automatic_enabled: false,
-        tls_automatic_challenge_type: "alpn".to_string(),
-        tls_automatic_last_update: 0,
-        tls_automatic_last_update_success: 0,
+        tls_automatic_enabled: configuration.core.admin_portal.tls_automatic_enabled,
         tls_cert_path: configuration.core.admin_portal.get_tls_certificate_path(),
         tls_cert_content: "".to_string(),
         tls_key_path: configuration.core.admin_portal.get_tls_key_path(),
@@ -305,6 +314,14 @@ fn load_core_config(connection: &Connection) -> Result<Core, String> {
             }
 
             // Admin portal settings
+            "admin_portal_domain_name" => {
+                if !value.is_empty() {
+                    core.admin_portal.domain_name = Some(value);
+                }
+            }
+            "admin_portal_tls_automatic_enabled" => {
+                core.admin_portal.tls_automatic_enabled = value.parse::<bool>().map_err(|e| format!("Failed to parse admin_portal_tls_automatic_enabled: {}", e))?;
+            }
             "admin_portal_tls_certificate_path" => {
                 core.admin_portal.tls_certificate_path = Some(value);
             }
@@ -390,28 +407,12 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
         // TLS Automatic Enabled (added in schema version 4)
         let tls_automatic_enabled: i64 = statement.read(13).map_err(|e| format!("Failed to read tls_automatic_enabled: {}", e))?;
 
-        // TLS Automatic Last Update (added in schema version 5)
-        let tls_automatic_last_update: i64 = statement.read(14).map_err(|e| format!("Failed to read tls_automatic_last_update: {}", e))?;
-
-        // TLS Automatic Last Update Success (added in schema version 5)
-        let tls_automatic_last_update_success: i64 = statement.read(15).map_err(|e| format!("Failed to read tls_automatic_last_update_success: {}", e))?;
-
-        // TLS Challenge Type (added in schema version 6)
-        let mut tls_automatic_challenge_type: String = statement.read(16).map_err(|e| format!("Failed to read tls_automatic_challenge_type: {}", e))?;
-        if tls_automatic_challenge_type.is_empty() {
-            // Default to "alpn" if empty for backward compatibility
-            tls_automatic_challenge_type = "alpn".to_string();
-        }
-
         sites.push(Site {
             id: site_id,
             hostnames,
             is_default: is_default != 0,
             is_enabled: is_enabled != 0,
             tls_automatic_enabled: tls_automatic_enabled != 0,
-            tls_automatic_challenge_type,
-            tls_automatic_last_update: tls_automatic_last_update as u64,
-            tls_automatic_last_update_success: tls_automatic_last_update_success as u64,
             tls_cert_path,
             tls_cert_content,
             tls_key_path,
@@ -420,12 +421,11 @@ fn load_sites(connection: &Connection) -> Result<Vec<Site>, String> {
             rewrite_functions,
             access_log_enabled: access_log_enabled != 0,
             access_log_file,
-            extra_headers
-    });
+            extra_headers,
+        });
     }
 
     Ok(sites)
-
 }
 fn load_binding_sites_relationships(connection: &Connection) -> Result<Vec<BindingSiteRelationship>, String> {
     let mut statement = connection

@@ -5,7 +5,7 @@ use crate::http::http_util::add_standard_headers_to_response;
 use crate::http::request_response::gruxi_request::GruxiRequest;
 use crate::http::request_response::gruxi_response::GruxiResponse;
 use crate::logging::syslog::{debug, error, info, trace, warn};
-use tokio_stream::StreamExt;
+use crate::tls::shared_acme_manager::initialize_shared_acme_manager;
 use hyper::Request;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -21,6 +21,12 @@ pub async fn initialize_server() {
     // Get configuration from the current configuration
     let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
     let config = cached_configuration.get_configuration().await;
+
+    // Initialize shared ACME manager ONCE before starting any bindings.
+    // This ensures all TLS bindings share a single ACME client, resolver, and polling task.
+    if let Err(e) = initialize_shared_acme_manager().await {
+        error(format!("Failed to initialize shared ACME manager: {}. ACME certificates will not be available.", e));
+    }
 
     // Starting listening on all configured bindings
     for binding in &config.bindings {
@@ -85,31 +91,14 @@ async fn start_server_binding(binding: Binding) {
 
     if binding.is_tls {
         // Build unified TLS acceptor that handles both ACME and manual certificates
-        let (tls_acceptor, acme_state_opt) = match build_unified_tls_acceptor(&binding).await {
+        // Note: ACME polling is handled by the shared manager, no per-binding task needed
+        let tls_acceptor = match build_unified_tls_acceptor(&binding).await {
             Ok(result) => result,
             Err(e) => {
                 error(format!("TLS setup failed for {}:{} => {}", binding.ip, binding.port, e));
                 return;
             }
         };
-
-        // If we have ACME state, spawn a task to poll it for certificate updates
-        if let Some(mut acme_state) = acme_state_opt {
-            let binding_info = format!("{}:{}", binding.ip, binding.port);
-            tokio::spawn(async move {
-                // Poll the ACME state to handle certificate acquisition and renewal
-                while let Some(event) = acme_state.next().await {
-                    match event {
-                        Ok(ok) => {
-                            trace(format!("ACME event for {}: {:?}", binding_info, ok));
-                        }
-                        Err(err) => {
-                            debug(format!("ACME error for {}: {:?}", binding_info, err));
-                        }
-                    }
-                }
-            });
-        }
 
         // Unified TLS accept loop
         loop {

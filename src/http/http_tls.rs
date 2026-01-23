@@ -1,12 +1,11 @@
 use crate::core::running_state_manager::get_running_state_manager;
 use crate::logging::syslog::{debug, warn};
+use crate::tls::shared_acme_manager::{get_shared_acme_domains, get_shared_acme_manager_async};
 use rand;
-use rustls_acme::caches::DirCache;
-use rustls_acme::{AcmeConfig, ResolvesServerCertAcme};
+use rustls_acme::ResolvesServerCertAcme;
 use rustls::crypto::aws_lc_rs;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::BufReader;
-use std::collections::BTreeSet;
 use tls_listener::rustls as tokio_rustls;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -19,96 +18,6 @@ use tokio_rustls::rustls::{self, ServerConfig as RustlsServerConfig};
 use crate::configuration::binding::Binding;
 use crate::configuration::site::Site;
 use crate::core::database_connection::get_database_connection;
-
-pub async fn build_acme_state_for_binding(
-    binding: &Binding,
-) -> Result<
-    Option<rustls_acme::AcmeState<Box<dyn std::fmt::Debug>, Box<dyn std::fmt::Debug>>>,
-    Box<dyn std::error::Error + Send + Sync>,
-> {
-    // Only relevant for TLS bindings.
-    if !binding.is_tls {
-        return Ok(None);
-    }
-
-    let cached_configuration = crate::configuration::cached_configuration::get_cached_configuration();
-    let config = cached_configuration.get_configuration().await;
-
-    let tls_settings = &config.core.tls_settings;
-
-    // ACME requires an account email to create/register the account.
-    if tls_settings.account_email.trim().is_empty() {
-        return Ok(None);
-    }
-
-    // Discover domains that have tls_automatic_enabled.
-    let running_state = get_running_state_manager().await.get_running_state_unlocked().await;
-    let binding_site_cache = running_state.get_binding_site_cache();
-    let sites = binding_site_cache.get_sites_for_binding(&binding.id);
-
-    // Collect domains that have ACME enabled (tls_automatic_enabled)
-    let mut domains: BTreeSet<String> = BTreeSet::new();
-    for site in sites.iter().filter(|s| s.is_enabled && s.tls_automatic_enabled) {
-        for hostname in &site.hostnames {
-            let h = hostname.trim().to_lowercase();
-            if h.is_empty() || h == "*" {
-                continue;
-            }
-
-            // Wildcards require DNS-01, which rustls-acme does not support.
-            if h.contains('*') {
-                continue;
-            }
-
-            // Avoid obviously-non-public hostnames.
-            if h == "localhost" {
-                continue;
-            }
-
-            // Minimal sanity: must look like a DNS name.
-            if !h.contains('.') {
-                continue;
-            }
-
-            domains.insert(h);
-        }
-    }
-
-    if domains.is_empty() {
-        return Ok(None);
-    }
-
-    let cache_dir = if tls_settings.certificate_cache_path.trim().is_empty() {
-        "certs/cache".to_string()
-    } else {
-        tls_settings.certificate_cache_path.trim().to_string()
-    };
-
-    // Ensure cache directory exists.
-    fs::create_dir_all(&cache_dir)
-        .await
-        .map_err(|e| format!("Failed to create ACME cache directory '{}': {}", cache_dir, e))?;
-
-    let provider = rustls::crypto::aws_lc_rs::default_provider();
-
-    let mut acme_config = AcmeConfig::new_with_provider(domains.iter().cloned().collect::<Vec<_>>(), provider.into())
-        .cache_with_boxed_err(DirCache::new(cache_dir.clone()))
-        .directory_lets_encrypt(!tls_settings.use_staging_server);
-
-    // rustls-acme requires `mailto:` prefix.
-    acme_config = acme_config.contact_push(format!("mailto:{}", tls_settings.account_email.trim()));
-
-    debug(format!(
-        "ACME enabled for binding {}:{} (staging={}, cache_dir='{}') domains={:?}",
-        binding.ip,
-        binding.port,
-        tls_settings.use_staging_server,
-        cache_dir,
-        domains
-    ));
-
-    Ok(Some(acme_config.state()))
-}
 
 // Persist generated cert/key to disk and update configuration for a specific site
 pub async fn persist_generated_tls_for_site(site: &Site, cert_pem: &str, key_pem: &str, is_admin: bool) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
@@ -318,13 +227,20 @@ pub async fn get_acme_domains_for_binding(binding: &Binding) -> std::collections
 }
 
 /// Build a unified certificate resolver that handles both ACME and manual certificates.
-/// This should be used when ACME is enabled for the binding.
+/// Uses the shared ACME manager if available.
 pub async fn build_unified_cert_resolver(
     binding: &Binding,
     acme_resolver: Option<std::sync::Arc<ResolvesServerCertAcme>>,
 ) -> Result<UnifiedCertResolver, Box<dyn std::error::Error + Send + Sync>> {
-    // Get ACME domains
-    let acme_domains = get_acme_domains_for_binding(binding).await;
+    // Get ACME domains from the shared manager if available, otherwise use binding-specific lookup
+    let acme_domains = {
+        let shared_domains = get_shared_acme_domains().await;
+        if !shared_domains.is_empty() {
+            shared_domains
+        } else {
+            get_acme_domains_for_binding(binding).await
+        }
+    };
 
     debug(format!(
         "Building unified cert resolver for {}:{} with {} ACME domains",
@@ -509,23 +425,16 @@ pub async fn build_unified_cert_resolver(
 }
 
 /// Build a unified TLS acceptor that handles both ACME and manual certificates.
-/// Returns the TlsAcceptor, optionally the AcmeState for polling, and the ACME resolver.
+/// Uses the shared ACME manager if available, ensuring only one ACME client exists globally.
+/// Returns the TlsAcceptor only (ACME polling is handled by the shared manager).
 pub async fn build_unified_tls_acceptor(
     binding: &Binding,
-) -> Result<
-    (
-        TlsAcceptor,
-        Option<rustls_acme::AcmeState<Box<dyn std::fmt::Debug>, Box<dyn std::fmt::Debug>>>,
-    ),
-    Box<dyn std::error::Error + Send + Sync>,
-> {
+) -> Result<TlsAcceptor, Box<dyn std::error::Error + Send + Sync>> {
     let provider = rustls::crypto::aws_lc_rs::default_provider();
 
-    // Try to build ACME state if there are any ACME-enabled sites
-    let acme_state = build_acme_state_for_binding(binding).await?;
-
-    // Get the ACME resolver if ACME is enabled
-    let acme_resolver = acme_state.as_ref().map(|state| state.resolver());
+    // Get the shared ACME resolver if available (already initialized during server startup)
+    let acme_resolver = get_shared_acme_manager_async().await;
+    let has_acme = acme_resolver.is_some();
 
     // Build the unified cert resolver with ACME and manual certs
     let unified_resolver = build_unified_cert_resolver(binding, acme_resolver).await?;
@@ -539,14 +448,14 @@ pub async fn build_unified_tls_acceptor(
 
     // Enable ALPN for HTTP/2 and HTTP/1.1, and add ACME TLS-ALPN-01 protocol if ACME is enabled
     server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    if acme_state.is_some() {
+    if has_acme {
         // TLS-ALPN-01 protocol identifier for ACME challenges
         server_config.alpn_protocols.push(b"acme-tls/1".to_vec());
     }
 
     let tls_acceptor = TlsAcceptor::from(std::sync::Arc::new(server_config));
 
-    Ok((tls_acceptor, acme_state))
+    Ok(tls_acceptor)
 }
 
 // Build a TLS acceptor that selects certificates per-site using SNI

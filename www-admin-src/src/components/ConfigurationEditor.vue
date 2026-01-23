@@ -118,6 +118,28 @@ const loadConfiguration = async () => {
                     }
                 }
             }
+
+            // Ensure admin_portal fields exist for older configs
+            if (!config.value.core.admin_portal) {
+                config.value.core.admin_portal = {
+                    domain_name: '',
+                    tls_automatic_enabled: false,
+                    tls_certificate_path: '',
+                    tls_key_path: '',
+                };
+            }
+            if (config.value.core.admin_portal.domain_name === null || config.value.core.admin_portal.domain_name === undefined) {
+                config.value.core.admin_portal.domain_name = '';
+            }
+            if (config.value.core.admin_portal.tls_automatic_enabled === null || config.value.core.admin_portal.tls_automatic_enabled === undefined) {
+                config.value.core.admin_portal.tls_automatic_enabled = false;
+            }
+            if (config.value.core.admin_portal.tls_certificate_path === null || config.value.core.admin_portal.tls_certificate_path === undefined) {
+                config.value.core.admin_portal.tls_certificate_path = '';
+            }
+            if (config.value.core.admin_portal.tls_key_path === null || config.value.core.admin_portal.tls_key_path === undefined) {
+                config.value.core.admin_portal.tls_key_path = '';
+            }
         } else {
             error.value = 'Failed to load configuration';
         }
@@ -1419,15 +1441,8 @@ onMounted(() => {
                                             <label>
                                                 <input v-model="site.tls_automatic_enabled" type="checkbox" />
                                                 Enable Automatic TLS Certificates
-                                                <span class="help-icon" data-tooltip="If enabled, Gruxi will attempt to automatically obtain and renew TLS certificates for this site. Requires Core Settings → TLS Settings (account email), and hostnames must be publicly reachable.">?</span>
+                                                <span class="help-icon" data-tooltip="If enabled, Gruxi will automatically obtain and renew TLS certificates for this site. Requires listening on port 443, Core Settings → TLS Settings (account email), and hostnames must be publicly reachable.">?</span>
                                             </label>
-                                        </div>
-                                        <div class="form-field compact" v-if="site.tls_automatic_enabled">
-                                            <label>Challenge Type (default: TLS-ALPN-01) <span class="help-icon" data-tooltip="TLS-ALPN-01 requires port 443 to be open, HTTP-01 requires port 80 to be open. Keep the default TLS-ALPN-01 unless you have specific needs.">?</span></label>
-                                            <select v-model="site.tls_automatic_challenge_type" class="width-auto-fit" >
-                                                <option value="alpn">TLS-ALPN-01</option>
-                                                <option value="http">HTTP-01</option>
-                                            </select>
                                         </div>
                                     </div>
 
@@ -1601,11 +1616,22 @@ onMounted(() => {
                         <div v-if="isCoreSubsectionExpanded('adminPortal')" class="item-content">
                             <div class="form-grid compact">
                                 <div class="form-field">
-                                    <label>TLS Certificate Path <span class="help-icon" data-tooltip="Full or relative path (relative to the Gruxi server) to the TLS certificate file for the admin portal.">?</span></label>
+                                    <label>Domain Name <span class="help-icon" data-tooltip="The domain name for the admin portal. Required when using automatic TLS. Example: admin.example.com">?</span></label>
+                                    <input v-model="config.core.admin_portal.domain_name" type="text" placeholder="admin.example.com" />
+                                </div>
+                                <div class="form-field full-width">
+                                    <label>
+                                        <input v-model="config.core.admin_portal.tls_automatic_enabled" type="checkbox" />
+                                        Enable Automatic TLS (Let's Encrypt)
+                                        <span class="help-icon" data-tooltip="When enabled, Gruxi will automatically obtain and renew TLS certificates from Let's Encrypt for the admin portal. Requires a valid public domain name and proper DNS configuration. Also requires the TLS settings (email) to be configured in the TLS Settings section below.">?</span>
+                                    </label>
+                                </div>
+                                <div v-if="!config.core.admin_portal.tls_automatic_enabled" class="form-field">
+                                    <label>TLS Certificate Path <span class="help-icon" data-tooltip="Full or relative path (relative to the Gruxi server) to the TLS certificate file for the admin portal. Only used when automatic TLS is disabled.">?</span></label>
                                     <input v-model="config.core.admin_portal.tls_certificate_path" type="text" />
                                 </div>
-                                <div class="form-field">
-                                    <label>TLS Key Path <span class="help-icon" data-tooltip="Full or relative path (relative to the Gruxi server) to the TLS key file for the admin portal.">?</span></label>
+                                <div v-if="!config.core.admin_portal.tls_automatic_enabled" class="form-field">
+                                    <label>TLS Key Path <span class="help-icon" data-tooltip="Full or relative path (relative to the Gruxi server) to the TLS key file for the admin portal. Only used when automatic TLS is disabled.">?</span></label>
                                     <input v-model="config.core.admin_portal.tls_key_path" type="text" />
                                 </div>
                             </div>

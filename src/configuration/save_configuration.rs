@@ -221,6 +221,12 @@ fn save_core_config(connection: &Connection, core: &Core) -> Result<(), String> 
     save_server_settings(connection, "blocked_file_patterns", &core.server_settings.blocked_file_patterns.join(","))?;
 
     // Save admin portal settings
+    if let Some(domain_name) = &core.admin_portal.domain_name {
+        save_server_settings(connection, "admin_portal_domain_name", domain_name)?;
+    } else {
+        save_server_settings(connection, "admin_portal_domain_name", "")?;
+    }
+    save_server_settings(connection, "admin_portal_tls_automatic_enabled", &core.admin_portal.tls_automatic_enabled.to_string())?;
     if let Some(cert_path) = &core.admin_portal.tls_certificate_path {
         save_server_settings(connection, "admin_portal_tls_certificate_path", cert_path)?;
     } else {
@@ -311,7 +317,7 @@ pub fn save_site(connection: &Connection, site: &Site) -> Result<(), String> {
 
     connection
         .execute(format!(
-            "INSERT INTO sites (id, is_default, is_enabled, hostnames, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, request_handlers, rewrite_functions, access_log_enabled, access_log_file, extra_headers, tls_automatic_enabled, tls_automatic_last_update, tls_automatic_last_update_success, tls_automatic_challenge_type) VALUES ('{}', {}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}', '{}', {}, {}, {}, '{}')",
+            "INSERT INTO sites (id, is_default, is_enabled, hostnames, tls_cert_path, tls_cert_content, tls_key_path, tls_key_content, request_handlers, rewrite_functions, access_log_enabled, access_log_file, extra_headers, tls_automatic_enabled) VALUES ('{}', {}, {}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}', '{}', {})",
             site.id,
             if site.is_default { 1 } else { 0 },
             if site.is_enabled { 1 } else { 0 },
@@ -325,10 +331,7 @@ pub fn save_site(connection: &Connection, site: &Site) -> Result<(), String> {
             if site.access_log_enabled { 1 } else { 0 },
             site.access_log_file.replace("'", "''"),
             extra_headers_str,
-            if site.tls_automatic_enabled { 1 } else { 0 },
-            site.tls_automatic_last_update,
-            site.tls_automatic_last_update_success,
-            site.tls_automatic_challenge_type.replace("'", "''")
+            if site.tls_automatic_enabled { 1 } else { 0 }
         ))
         .map_err(|e| format!("Failed to insert site: {}", e))?;
 
