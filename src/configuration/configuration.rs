@@ -42,10 +42,10 @@ impl Configuration {
             binding_sites: vec![],
             core: Core {
                 file_cache: FileCache {
-                    is_enabled: false,
+                    is_enabled: true,
                     cache_item_size: 1000,
                     cache_max_size_per_file: 1024 * 1024 * 1,
-                    cache_item_time_between_checks: 20, // seconds
+                    cache_item_time_between_checks: 30, // seconds
                     cleanup_thread_interval: 10,        // seconds
                     max_item_lifetime: 60,              // seconds
                     forced_eviction_threshold: 70,      // 1-99 %
